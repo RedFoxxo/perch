@@ -84,5 +84,8 @@ export const Doctor = z
         blockers: z.array(z.string()),
       })
       .loose(),
+    // perch's own additions, from backends that translate (Windows): shown as they are.
+    notes: z.array(z.string()).nullish(),
+    setup_hint: z.string().nullish(),
   })
   .loose()

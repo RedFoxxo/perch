@@ -7,8 +7,11 @@ agent's context small.
 perch does no desktop work itself. On Linux it runs
 [computer-use-linux](https://github.com/agent-sh/computer-use-linux), which
 handles accessibility trees, screenshots, Wayland and X11 input, and window
-targeting on GNOME, KDE, Hyprland, Sway and others. perch shows the agent a
-shorter interface over it. Windows and macOS are planned.
+targeting on GNOME, KDE, Hyprland, Sway and others. On Windows it runs the
+Windows runtime of
+[open-computer-use](https://github.com/opensymph/open-computer-use) (UI
+Automation, window messages, window capture). perch shows the agent the same
+short interface over both. macOS is planned.
 
 ## Tools
 
@@ -27,14 +30,15 @@ What it does for the agent:
 - **Screenshot pixels.** `[x, y]` in `act_window` are pixels of the window's
   last `read_screenshot`; perch converts them.
 - **Your screen stays yours where it can.** Clicking an element whose
-  primary action is click, press or toggle runs that action without
-  focusing the window, on every desktop. On Hyprland, keys and window
-  screenshots also stay in the background, so a test app on a hidden
-  workspace never comes to the front; elsewhere both bring the window
-  forward. Other elements (a table cell that expands or edits) are refused
-  with their action names, to use as an `action` step. Mouse steps need an
-  explicit `focus` step, and keys for the focused window are refused if you
-  moved the focus.
+  primary action is click, press or toggle (Windows: invoke, select or
+  toggle) runs that action without focusing the window, on every desktop.
+  On Hyprland and Windows, keys and window screenshots also stay in the
+  background, so a test app on a hidden workspace or behind other windows
+  never comes to the front; elsewhere both bring the window forward. Other
+  elements (a table cell that expands or edits) are refused with their
+  action names, to use as an `action` step. Mouse steps need an explicit
+  `focus` step, and keys for the focused window are refused if you moved
+  the focus.
 - **Reused window ids.** If a window closed and another app got its id,
   `act_window` refuses instead of acting in the wrong app.
 - **Typed text is never echoed** in results.
@@ -76,6 +80,28 @@ and back in:
 npx -y @redfoxxo/perch@1 setup-window-targeting
 ```
 
+On Windows, open-computer-use comes with perch; nothing else to install.
+Run perch in the signed-in desktop session, not over SSH or as a service.
+What differs from Linux:
+
+- **Background keys and typing** are posted to the window as messages.
+  Classic Win32 fields take them; some newer apps (Chromium, Electron,
+  WinUI) ignore them, so the step says to check the result. `focused: true`
+  after a `focus` step sends real keystrokes instead.
+- **Drags** take pixels of the window's screenshot, like clicks.
+- **Trees** show no disabled or checked state: the runtime doesn't report
+  them.
+- **Refused apps:** open-computer-use won't touch terminals, PowerShell,
+  password managers or Windows Security. Apps running as administrator can
+  be read but not clicked or typed into unless perch runs as administrator
+  too.
+- **Slower steps:** the runtime runs every operation in a new process, so a
+  crashing capture can't take perch down; open-computer-use measured
+  0.4–2 s per operation.
+- **Scaled displays:** perch starts the runtime as system DPI aware
+  (`__COMPAT_LAYER=HighDpiAware`, unless you set that variable), so window
+  positions and UI Automation coordinates are both in pixels.
+
 ## Develop
 
 ```sh
@@ -83,6 +109,7 @@ npm ci
 npm test
 npm run typecheck
 npm run build   # build/index.js is the server
+node scripts/e2e-windows.mjs   # Windows only, after the build: drives Notepad for real
 ```
 
 ## License

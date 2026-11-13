@@ -7,7 +7,7 @@ import { defineTool, failure, text, type ToolContext } from './types.js'
 
 const Ref = z.string().regex(/^e\d+$/).describe('Element ref from read_window, e.g. e34')
 const Point = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of this window')
-const ScreenPoint = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of the whole screen')
+const ScreenPoint = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of the whole screen (Windows: of this window)')
 const Target = z.union([Ref, Point])
 
 const Step = z.union([
@@ -82,15 +82,21 @@ async function checkWindow(window: number, ctx: ToolContext): Promise<void> {
 
 /**
  * A drag runs in whole-desktop capture pixels: window positions from the compositor are logical
- * and per-monitor, so the points come from a full-screen screenshot instead.
+ * and per-monitor, so the points come from a full-screen screenshot instead. Backends that place
+ * window-relative points themselves (Windows) take them from the window's screenshot.
  */
-function dragArgs(step: { drag: [number, number]; to: [number, number] }, ctx: ToolContext) {
-  const shot = ctx.session.screenshots.get('screen')
-  if (!shot) throw new Refused('read_screenshot without a window first: drag points are pixels of the whole screen.')
+function dragArgs(step: { drag: [number, number]; to: [number, number] }, window: number, ctx: ToolContext) {
+  const inWindow = ctx.backend.dragInWindow
+  const shot = ctx.session.screenshots.get(inWindow ? window : 'screen')
+  if (!shot) {
+    throw new Refused(
+      inWindow ? `read_screenshot window ${window} first: drag points are pixels of its last screenshot.` : 'read_screenshot without a window first: drag points are pixels of the whole screen.',
+    )
+  }
   const toCapture = ([x, y]: [number, number]) => [Math.round(x / shot.scale), Math.round(y / shot.scale)] as const
   const [sx, sy] = toCapture(step.drag)
   const [ex, ey] = toCapture(step.to)
-  return { start_x: sx, start_y: sy, end_x: ex, end_y: ey }
+  return { ...(inWindow ? { window_id: window } : {}), start_x: sx, start_y: sy, end_x: ex, end_y: ey }
 }
 
 /** How a step is reported; typed text is never echoed. */
@@ -107,8 +113,8 @@ function labelOf(step: Step): string {
   return `wait ${step.wait} ms`
 }
 
-/** Primary actions that mean "click"; the server substitutes only these for a pointer click too. */
-const CLICK_ACTIONS: Record<string, true> = { click: true, press: true, toggle: true }
+/** Primary actions that mean "click" (AT-SPI's, then UI Automation's); the server substitutes only these for a pointer click too. */
+const CLICK_ACTIONS: Record<string, true> = { click: true, press: true, toggle: true, invoke: true, select: true }
 
 /** Steps that move the real pointer: the window, and its workspace, must be on screen, so they come to the front. */
 function usesPointer(step: Step): boolean {
@@ -137,20 +143,22 @@ async function run(step: Step, window: number, ctx: ToolContext, focused: boolea
     }
     return backend.call('click', { window_id: window, ...target(step.click, window, ctx), button: step.button, click_count: step.count })
   }
-  if ('type' in step) {
-    if (!step.focused) return backend.call('type_text', { window_id: window, text: step.type })
+  if ('type' in step || 'key' in step) {
+    const tool = 'type' in step ? 'type_text' : 'press_key'
+    const input = 'type' in step ? { text: step.type } : { key: step.key }
+    if (!step.focused) return backend.call(tool, { window_id: window, ...input })
+    if (backend.focusedInputByWindow) {
+      // The backend brings the window forward itself; require the explicit focus step all the same.
+      if (!focused) throw new Refused('focused keys bring the window in front of the user: add { focus: true } before them.')
+      return backend.call(tool, { window_id: window, ...input, focused: true })
+    }
     await ensureFocused(window, ctx)
-    return backend.call('type_text', { text: step.type })
-  }
-  if ('key' in step) {
-    if (!step.focused) return backend.call('press_key', { window_id: window, key: step.key })
-    await ensureFocused(window, ctx)
-    return backend.call('press_key', { key: step.key })
+    return backend.call(tool, input)
   }
   if ('set' in step) return backend.call('set_value', { window_id: window, ...element(step.set, window, ctx), value: step.value })
   if ('action' in step) return backend.call('perform_action', { window_id: window, ...element(step.action, window, ctx), action: step.name })
   if ('scroll' in step) return backend.call('scroll', { window_id: window, ...target(step.scroll, window, ctx), direction: step.direction, pages: step.pages })
-  if ('drag' in step) return backend.call('drag', dragArgs(step, ctx))
+  if ('drag' in step) return backend.call('drag', dragArgs(step, window, ctx))
   if ('focus' in step) return backend.call('activate_window', { window_id: window })
   await sleep(step.wait)
   return undefined
@@ -161,11 +169,11 @@ export const actTools = [
     name: 'act_window',
     description:
       'Run steps in one window, in order, stopping at the first that fails: click, type, key, set, action, scroll, drag, focus, wait. ' +
-      'Targets are e-refs from read_window or [x, y] pixels of its read_screenshot; drag takes pixels of a whole-screen read_screenshot. ' +
-      'Element clicks, set and action never bring the window to the front; keys and typing don\'t on Hyprland, elsewhere they focus it. ' +
+      'Targets are e-refs from read_window or [x, y] pixels of its read_screenshot; drag takes pixels of a whole-screen read_screenshot (Windows: of the window\'s). ' +
+      'Element clicks, set and action never bring the window to the front; keys and typing don\'t on Hyprland and Windows (some Windows apps ignore them: check), elsewhere they focus it. ' +
       'Mouse steps ([x, y] clicks, right or double clicks, scroll, drag) need a focus step first, which shows the window to the user. ' +
-      'focused: true sends keys to the focused window, refused if the focus moved. then: tree (default after read_window) or screenshot ' +
-      '(brings the window forward except on Hyprland) shows the result.',
+      'focused: true sends real keys to the focused window, refused if the focus moved. then: tree (default after read_window) or screenshot ' +
+      '(brings the window forward except on Hyprland and Windows) shows the result.',
     input: {
       window: z.number().int().describe('Window id from read_windows'),
       steps: z.array(Step).min(1).max(20),
@@ -191,7 +199,8 @@ export const actTools = [
             stopped = true
             break
           }
-          lines.push(`${i + 1} ok ${label}${res?.message.includes('send_key_state') ? ' (background)' : ''}`)
+          const note = res?.note ?? (res?.message.includes('send_key_state') ? 'background' : undefined)
+          lines.push(`${i + 1} ok ${label}${note ? ` (${note})` : ''}`)
         } catch (error) {
           // Report what already ran, so the agent doesn't send those steps again.
           if (error instanceof Refused) lines.push(`${i + 1} refused ${label}: ${error.message}`)

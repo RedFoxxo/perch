@@ -3,6 +3,19 @@
 Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal).
 
+## 1.1.0 — unreleased
+
+- Windows: the same five tools over open-computer-use 1.3.0's Windows runtime
+  (UI Automation, window messages, WGC/PrintWindow capture), started per
+  operation with every input gate set by perch: element clicks, `set` and
+  `action` through UI Automation, background keys and typing as window
+  messages (marked "check the result"), real input only after a `focus`
+  step. Window screenshots are shrunk to `max_edge` by perch; drags take
+  window screenshot pixels.
+- `read_status` shows a backend's own notes and setup advice.
+- CI on Linux and Windows; on Windows it drives Notepad through perch
+  (`scripts/e2e-windows.mjs`).
+
 ## 1.0.0 — 2026-11-13
 
 - First version: five tools (`read_windows`, `read_window`, `read_screenshot`,

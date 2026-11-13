@@ -1,7 +1,7 @@
 {
   "name": "@redfoxxo/perch",
-  "version": "1.0.0",
-  "description": "A small MCP server for desktop control: a few compact tools over computer-use-linux, built to keep the agent's context small.",
+  "version": "1.1.0",
+  "description": "A small MCP server for desktop control on Linux and Windows: a few compact tools over computer-use-linux and open-computer-use, built to keep the agent's context small.",
   "type": "module",
   "bin": {
     "perch": "build/index.js"
@@ -20,7 +20,8 @@
     "zod": "4.6.5"
   },
   "optionalDependencies": {
-    "@agent-sh/computer-use-linux": "0.7.53"
+    "@agent-sh/computer-use-linux": "0.7.53",
+    "@opensymph/open-computer-use": "1.3.0"
   },
   "devDependencies": {
     "@types/node": "22.20.4",

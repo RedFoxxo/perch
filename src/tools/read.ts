@@ -94,7 +94,7 @@ export const readTools = [
     raises: true,
     description:
       'Picture of one window (or the whole screen without window), longest side max_edge px. A window is captured in the background ' +
-      'on Hyprland; elsewhere it comes to the front. Costs image tokens: prefer read_window. With file, saves a PNG there instead.',
+      'on Hyprland and Windows; elsewhere it comes to the front. Costs image tokens: prefer read_window. With file, saves a PNG there instead.',
     input: {
       window: windowId.optional(),
       max_edge: z.number().int().min(200).max(1920).default(1024),
@@ -110,15 +110,18 @@ export const readTools = [
     async handler(_args, ctx) {
       const res = await ctx.backend.call('doctor', {})
       if (!res.ok) return failure(res.message || 'Could not check the desktop.')
-      const { readiness: r } = Doctor.parse(res.data)
+      const { readiness: r, notes, setup_hint } = Doctor.parse(res.data)
       const mark = (ok: boolean) => (ok ? '✔' : '✘')
       const lines = [
         `${mark(r.can_build_accessibility_tree)} buttons and fields (accessibility)`,
         `${mark(r.can_send_development_input)} mouse and keyboard`,
         `${mark(r.can_query_windows)} window list`,
         ...r.blockers.map((b) => `blocked: ${b}`),
+        ...(notes ?? []),
       ]
-      if (r.blockers.length) lines.push('Setup: https://github.com/agent-sh/computer-use-linux#quick-start (GNOME: npx -y @redfoxxo/perch@1 setup-window-targeting).')
+      if (r.blockers.length) {
+        lines.push(`Setup: ${setup_hint ?? 'https://github.com/agent-sh/computer-use-linux#quick-start (GNOME: npx -y @redfoxxo/perch@1 setup-window-targeting).'}`)
+      }
       return text(lines.join('\n'))
     },
   }),

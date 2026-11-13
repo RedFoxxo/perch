@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { computerUseLinuxCli, linuxBackend, unsupportedBackend } from './backend.js'
 import { createServer } from './server.js'
 import { newSession } from './tools/types.js'
+import { windowsBackend } from './windows.js'
 
 /**
  * Desktop setup that needs computer-use-linux's own CLI, run with the version perch bundles,
@@ -48,7 +49,12 @@ async function main(): Promise<void> {
   }
   let clientName: string | undefined
   // The desktop server starts on the first tool call, and shows the client's name on screen.
-  const backend = process.platform === 'linux' ? linuxBackend(() => clientName) : unsupportedBackend(process.platform)
+  const backend =
+    process.platform === 'linux'
+      ? linuxBackend(() => clientName)
+      : process.platform === 'win32'
+        ? windowsBackend()
+        : unsupportedBackend(process.platform)
   const server = createServer({ backend, session: newSession() })
   server.server.oninitialized = () => {
     clientName = server.server.getClientVersion()?.name

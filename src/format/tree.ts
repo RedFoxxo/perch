@@ -18,6 +18,14 @@ const INTERACTIVE: Record<string, true> = {
   link: true,
   'page tab': true,
   'tree item': true,
+  // UI Automation's control types, as windows.ts names them.
+  edit: true,
+  document: true,
+  hyperlink: true,
+  'list item': true,
+  'tab item': true,
+  'split button': true,
+  spinner: true,
 }
 /** States shown in a line; the common ones (enabled, visible, focusable…) are implied. */
 const SHOWN_STATES = ['checked', 'selected', 'focused', 'expanded', 'editable', 'pressed'] as const

@@ -5,9 +5,19 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { Outcome } from './upstream.js'
 import { VERSION } from './version.js'
 
-/** What perch needs from the server that does the real work. */
+/**
+ * What perch needs from the server that does the real work. Tools call it with computer-use-linux's
+ * tool names and argument shapes; other platforms translate (`windows.ts`).
+ */
 export interface Backend {
   call(tool: string, args: Record<string, unknown>): Promise<BackendResult>
+  /**
+   * Focused keys go to `window_id` with `focused: true`, and the backend brings that window forward
+   * itself right before sending, instead of perch checking which window has the focus.
+   */
+  readonly focusedInputByWindow?: true
+  /** Drags take window-relative points from the window's screenshot, not whole-screen ones. */
+  readonly dragInWindow?: true
 }
 
 export interface BackendResult {
@@ -18,6 +28,8 @@ export interface BackendResult {
   /** The server's whole `message` (or its text): failures need its recovery hint, which often comes last. */
   message: string
   images: { data: string; mimeType: string }[]
+  /** Shown after a step that worked, e.g. that keys went in the background. */
+  note?: string
 }
 
 interface Content {
