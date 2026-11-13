@@ -1,16 +1,29 @@
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { formatTree } from '../format/tree.js'
-import { AppState, Doctor, ScreenshotMeta, TreeNode, WindowList } from '../upstream.js'
+import { AppState, Doctor, ScreenshotMeta, TreeNode, WindowList, type Window } from '../upstream.js'
 import { defineTool, failure, text, type ToolContext, type ToolOutput } from './types.js'
 
 const windowId = z.number().int().describe('Window id from read_windows')
+
+/** The window list, or why it can't be had: the server answers a failed listing with no windows and an `error`. */
+export async function listWindows(ctx: ToolContext): Promise<{ windows: Window[] } | { error: string }> {
+  const res = await ctx.backend.call('list_windows', {})
+  if (!res.ok) return { error: res.message || 'could not list windows.' }
+  const list = WindowList.parse(res.data)
+  if (list.error) return { error: [list.error, list.permissions_hint].filter(Boolean).join(' ') }
+  return { windows: list.windows }
+}
 
 /** Reads one window's tree, remembers its snapshot, and returns it as compact text. */
 export async function readWindow(window: number, ctx: ToolContext): Promise<ToolOutput> {
   const res = await ctx.backend.call('get_app_state', { window_id: window, include_screenshot: false })
   if (!res.ok) return failure(res.message || 'Could not read the window.')
   const state = AppState.parse(res.data)
+  // Refs from an earlier read stay valid only until this one replaced the server's tree.
+  ctx.session.snapshot = undefined
+  const problem = state.window_error ?? state.accessibility_error
+  if (problem) return failure(`Could not read window ${window}: ${problem}`)
   // Large trees come back in a file; read it now, the server replaces it on the next read.
   const nodes = state.accessibility_tree_spill
     ? z.array(TreeNode).parse(JSON.parse(readFileSync(state.accessibility_tree_spill.path, 'utf8')))
@@ -26,7 +39,7 @@ export async function readWindow(window: number, ctx: ToolContext): Promise<Tool
         'Use read_screenshot, then act_window click [x, y].',
     )
   }
-  return text(tree)
+  return text(state.accessibility_tree_truncated ? `${tree}\n(the tree was cut short: the window has more elements)` : tree)
 }
 
 /** Takes a screenshot of a window (or the whole screen) and remembers its scale for clicks. */
@@ -51,9 +64,9 @@ export const readTools = [
     description: 'Open windows, one per line: id, app, title, focused, workspace.',
     input: {},
     async handler(_args, ctx) {
-      const res = await ctx.backend.call('list_windows', {})
-      if (!res.ok) return failure(res.message || 'Could not list windows.')
-      const { windows } = WindowList.parse(res.data)
+      const list = await listWindows(ctx)
+      if ('error' in list) return failure(`Could not list windows: ${list.error}`)
+      const { windows } = list
       ctx.session.windows = new Map(windows.map((w) => [w.window_id, w]))
       if (!windows.length) return text('No windows.')
       return text(
@@ -78,9 +91,10 @@ export const readTools = [
 
   defineTool({
     name: 'read_screenshot',
+    raises: true,
     description:
-      'Picture of one window (or the whole screen without window), longest side max_edge px. ' +
-      'Costs image tokens: prefer read_window. With file, saves a PNG there instead of returning the image.',
+      'Picture of one window (or the whole screen without window), longest side max_edge px. A window is captured in the background ' +
+      'on Hyprland; elsewhere it comes to the front. Costs image tokens: prefer read_window. With file, saves a PNG there instead.',
     input: {
       window: windowId.optional(),
       max_edge: z.number().int().min(200).max(1920).default(1024),
@@ -104,7 +118,7 @@ export const readTools = [
         `${mark(r.can_query_windows)} window list`,
         ...r.blockers.map((b) => `blocked: ${b}`),
       ]
-      if (r.blockers.length) lines.push("Fix setup problems with the desktop skill's fix.mjs.")
+      if (r.blockers.length) lines.push('Setup: https://github.com/agent-sh/computer-use-linux#quick-start (GNOME: npx -y @redfoxxo/perch@1 setup-window-targeting).')
       return text(lines.join('\n'))
     },
   }),

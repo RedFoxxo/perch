@@ -35,6 +35,9 @@ async function main(): Promise<void> {
     clientName = server.server.getClientVersion()?.name
   }
   await server.connect(new StdioServerTransport())
+  // The stdio transport doesn't end when the client closes stdin; without this, perch and its
+  // desktop server would keep running until the client kills them.
+  process.stdin.on('end', () => process.exit(0))
   process.stderr.write('perch: ready on stdio\n')
 }
 

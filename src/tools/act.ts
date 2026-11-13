@@ -1,12 +1,13 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import type { BackendResult } from '../backend.js'
-import { WindowList } from '../upstream.js'
-import { readScreenshot, readWindow } from './read.js'
+import { FocusedWindow } from '../upstream.js'
+import { listWindows, readScreenshot, readWindow } from './read.js'
 import { defineTool, failure, text, type ToolContext } from './types.js'
 
 const Ref = z.string().regex(/^e\d+$/).describe('Element ref from read_window, e.g. e34')
 const Point = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of this window')
+const ScreenPoint = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of the whole screen')
 const Target = z.union([Ref, Point])
 
 const Step = z.union([
@@ -26,7 +27,7 @@ const Step = z.union([
   z.strictObject({ set: Ref, value: z.string().describe('Fills a field or slider directly') }),
   z.strictObject({ action: Ref, name: z.string().optional().describe('Named action; default: its first') }),
   z.strictObject({ scroll: Target, direction: z.enum(['up', 'down', 'left', 'right']), pages: z.number().positive().optional() }),
-  z.strictObject({ drag: Point, to: Point }),
+  z.strictObject({ drag: ScreenPoint, to: ScreenPoint }),
   z.strictObject({ focus: z.literal(true).describe('Bring the window to the front') }),
   z.strictObject({ wait: z.number().int().min(0).max(10_000).describe('Milliseconds') }),
 ])
@@ -55,9 +56,8 @@ function target(t: string | [number, number], window: number, ctx: ToolContext) 
 /** Refuses untargeted keys unless the window still has the focus, so they can't land in the user's windows. */
 async function ensureFocused(window: number, ctx: ToolContext): Promise<void> {
   const res = await ctx.backend.call('focused_window', {})
-  const focused = z.object({ window_id: z.number() }).loose().safeParse(res.data)
-  const nested = z.object({ window: z.object({ window_id: z.number() }).loose() }).loose().safeParse(res.data)
-  const id = focused.success ? focused.data.window_id : nested.success ? nested.data.window.window_id : undefined
+  const answer = FocusedWindow.safeParse(res.data)
+  const id = answer.success ? answer.data.focused_window?.window_id : undefined
   if (id !== window) throw new Refused(`window ${window} does not have the focus (the user may have moved it); nothing was sent.`)
 }
 
@@ -66,10 +66,10 @@ async function ensureFocused(window: number, ctx: ToolContext): Promise<void> {
  * Refuses when `window` is gone, or now belongs to another app than when perch last saw it.
  */
 async function checkWindow(window: number, ctx: ToolContext): Promise<void> {
-  const res = await ctx.backend.call('list_windows', {})
-  if (!res.ok) throw new Refused(res.message || 'could not list windows.')
+  const list = await listWindows(ctx)
+  if ('error' in list) throw new Refused(`could not list windows: ${list.error}`)
   const known = ctx.session.windows.get(window)
-  const windows = new Map(WindowList.parse(res.data).windows.map((w) => [w.window_id, w]))
+  const windows = new Map(list.windows.map((w) => [w.window_id, w]))
   const now = windows.get(window)
   // Keep what perch knew about other windows, so their ids stay checked too.
   for (const [id, w] of windows) if (!ctx.session.windows.has(id) || id === window) ctx.session.windows.set(id, w)
@@ -80,12 +80,17 @@ async function checkWindow(window: number, ctx: ToolContext): Promise<void> {
   }
 }
 
-function dragArgs(step: { drag: [number, number]; to: [number, number] }, window: number, ctx: ToolContext) {
-  const bounds = ctx.session.windows.get(window)?.bounds
-  if (!bounds) throw new Refused(`the position of window ${window} is unknown, so a drag can't be placed.`)
-  const from = point(step.drag, window, ctx)
-  const to = point(step.to, window, ctx)
-  return { start_x: bounds.x + from.x, start_y: bounds.y + from.y, end_x: bounds.x + to.x, end_y: bounds.y + to.y }
+/**
+ * A drag runs in whole-desktop capture pixels: window positions from the compositor are logical
+ * and per-monitor, so the points come from a full-screen screenshot instead.
+ */
+function dragArgs(step: { drag: [number, number]; to: [number, number] }, ctx: ToolContext) {
+  const shot = ctx.session.screenshots.get('screen')
+  if (!shot) throw new Refused('read_screenshot without a window first: drag points are pixels of the whole screen.')
+  const toCapture = ([x, y]: [number, number]) => [Math.round(x / shot.scale), Math.round(y / shot.scale)] as const
+  const [sx, sy] = toCapture(step.drag)
+  const [ex, ey] = toCapture(step.to)
+  return { start_x: sx, start_y: sy, end_x: ex, end_y: ey }
 }
 
 /** How a step is reported; typed text is never echoed. */
@@ -145,7 +150,7 @@ async function run(step: Step, window: number, ctx: ToolContext, focused: boolea
   if ('set' in step) return backend.call('set_value', { window_id: window, ...element(step.set, window, ctx), value: step.value })
   if ('action' in step) return backend.call('perform_action', { window_id: window, ...element(step.action, window, ctx), action: step.name })
   if ('scroll' in step) return backend.call('scroll', { window_id: window, ...target(step.scroll, window, ctx), direction: step.direction, pages: step.pages })
-  if ('drag' in step) return backend.call('drag', dragArgs(step, window, ctx))
+  if ('drag' in step) return backend.call('drag', dragArgs(step, ctx))
   if ('focus' in step) return backend.call('activate_window', { window_id: window })
   await sleep(step.wait)
   return undefined
@@ -156,10 +161,11 @@ export const actTools = [
     name: 'act_window',
     description:
       'Run steps in one window, in order, stopping at the first that fails: click, type, key, set, action, scroll, drag, focus, wait. ' +
-      'Targets are e-refs from read_window or [x, y] pixels of read_screenshot. Element clicks, keys and typing work without bringing the window ' +
-      'to the front (keys on Hyprland; elsewhere keys focus it). Mouse steps ([x, y] clicks, right or double clicks, scroll, drag) need a ' +
-      'focus step first, which shows the window to the user. focused: true sends keys to the focused window, refused if the focus moved. ' +
-      'then: tree (default after read_window) or screenshot shows the result.',
+      'Targets are e-refs from read_window or [x, y] pixels of its read_screenshot; drag takes pixels of a whole-screen read_screenshot. ' +
+      'Element clicks, set and action never bring the window to the front; keys and typing don\'t on Hyprland, elsewhere they focus it. ' +
+      'Mouse steps ([x, y] clicks, right or double clicks, scroll, drag) need a focus step first, which shows the window to the user. ' +
+      'focused: true sends keys to the focused window, refused if the focus moved. then: tree (default after read_window) or screenshot ' +
+      '(brings the window forward except on Hyprland) shows the result.',
     input: {
       window: z.number().int().describe('Window id from read_windows'),
       steps: z.array(Step).min(1).max(20),
@@ -187,8 +193,9 @@ export const actTools = [
           }
           lines.push(`${i + 1} ok ${label}${res?.message.includes('send_key_state') ? ' (background)' : ''}`)
         } catch (error) {
-          if (!(error instanceof Refused)) throw error
-          lines.push(`${i + 1} refused ${label}: ${error.message}`)
+          // Report what already ran, so the agent doesn't send those steps again.
+          if (error instanceof Refused) lines.push(`${i + 1} refused ${label}: ${error.message}`)
+          else lines.push(`${i + 1} unknown ${label}: the desktop server failed (${error instanceof Error ? error.message : String(error)}); this step may have run. Look before retrying.`)
           stopped = true
           break
         }
@@ -196,9 +203,14 @@ export const actTools = [
       if (stopped && lines.length < steps.length) lines.push(`Stopped; steps ${lines.length + 1}–${steps.length} not run.`)
       const show = then ?? (ctx.session.snapshot?.window === window ? 'tree' : 'none')
       if (show === 'none') return stopped ? failure(lines.join('\n')) : text(lines.join('\n'))
-      const after = show === 'tree' ? await readWindow(window, ctx) : await readScreenshot(window, 1024, undefined, ctx)
+      let after
+      try {
+        after = show === 'tree' ? await readWindow(window, ctx) : await readScreenshot(window, 1024, undefined, ctx)
+      } catch (error) {
+        after = failure(`Could not show the result: ${error instanceof Error ? error.message : String(error)}`)
+      }
       const content = [{ type: 'text' as const, text: lines.join('\n') }, ...after.content]
-      return stopped ? { content, isError: true } : { content }
+      return stopped || after.isError ? { content, isError: true } : { content }
     },
   }),
 ]

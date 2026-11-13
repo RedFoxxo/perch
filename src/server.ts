@@ -11,12 +11,14 @@ export function createServer(ctx: ToolContext, tools: ToolDef[] = allTools): Mcp
   const server = new McpServer({ name: 'perch', version: VERSION })
   for (const tool of tools) {
     const reads = tool.name.startsWith('read_')
+    // A window screenshot raises the window outside Hyprland's background mode, so it changes what the user sees.
+    const readOnly = reads && !tool.raises
     server.registerTool(
       tool.name,
       {
         description: tool.description,
         inputSchema: tool.input,
-        annotations: { readOnlyHint: reads, destructiveHint: !reads, openWorldHint: true },
+        annotations: { readOnlyHint: readOnly, destructiveHint: !reads, openWorldHint: true },
       },
       async (args: Record<string, unknown>) => tool.handler(args, ctx),
     )

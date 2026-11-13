@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseResult } from '../src/backend.js'
 import type { ToolContext, ToolOutput } from '../src/tools/types.js'
 import { allTools } from '../src/server.js'
-import { context, fakeBackend, ok, W } from './helpers.js'
+import { context, fakeBackend, fixture, ok, W } from './helpers.js'
 
 // Handlers take parsed arguments; tests pass them as the MCP server would after validation.
 async function call(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput> {
@@ -124,8 +124,10 @@ describe('act_window', () => {
   })
 
   it('sends focused keys only while the window still has the focus', async () => {
+    // The answer computer-use-linux 0.7.53 gives, with neutral names; only the window id changes.
+    const answer = fixture('focused_window.json') as { focused_window: { window_id: number } }
     let focused = W
-    const { backend, calls } = fakeBackend({ focused_window: () => ok({ window_id: focused }), type_text: done })
+    const { backend, calls } = fakeBackend({ focused_window: () => ok({ ...answer, focused_window: { ...answer.focused_window, window_id: focused } }), type_text: done })
     const ctx = context(backend)
     expect(textOf(await call('act_window', { window: W, steps: [{ type: 'è', focused: true }], then: 'none' }, ctx))).toBe('1 ok type (1 characters)')
     expect(calls.at(-1)).toEqual({ tool: 'type_text', args: { text: 'è' } })
@@ -136,17 +138,56 @@ describe('act_window', () => {
     expect(calls.filter((c) => c.tool === 'type_text')).toHaveLength(1)
   })
 
-  it('places a drag on the desktop from the window position', async () => {
-    const { backend, calls } = fakeBackend({
-      screenshot: () => ok({ width: 500, height: 500, scale: 0.5 }),
-      list_windows: () => ok({ windows: [{ window_id: W, bounds: { x: 1000, y: 20, width: 1000, height: 1000 } }] }),
-      activate_window: done,
-      drag: done,
-    })
+  it('places a drag in whole-desktop pixels from the last full-screen screenshot', async () => {
+    const { backend, calls } = fakeBackend({ screenshot: () => ok({ width: 960, height: 270, scale: 0.25 }), activate_window: done, drag: done })
+    const ctx = context(backend)
+    await call('read_screenshot', { max_edge: 960 }, ctx)
+    await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 10], to: [50, 60] }], then: 'none' }, ctx)
+    expect(calls.at(-1)).toEqual({ tool: 'drag', args: { start_x: 40, start_y: 40, end_x: 200, end_y: 240 } })
+  })
+
+  it('refuses a drag before a full-screen screenshot, even after one of the window', async () => {
+    const { backend, calls } = fakeBackend({ screenshot: () => ok({ width: 500, height: 500, scale: 0.5 }), activate_window: done, drag: done })
     const ctx = context(backend)
     await call('read_screenshot', { window: W, max_edge: 500 }, ctx)
-    await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 10], to: [50, 60] }], then: 'none' }, ctx)
-    expect(calls.at(-1)).toEqual({ tool: 'drag', args: { start_x: 1020, start_y: 40, end_x: 1100, end_y: 140 } })
+    const r = await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 10], to: [50, 60] }] }, ctx)
+    expect(textOf(r)).toContain('refused drag [10,10] to [50,60]: read_screenshot without a window first')
+    expect(calls.map((c) => c.tool)).not.toContain('drag')
+  })
+
+  it('reports steps that already ran when the desktop server fails midway', async () => {
+    const { backend } = fakeBackend({
+      press_key: done,
+      type_text: () => {
+        throw new Error('MCP error -32000: Connection closed')
+      },
+    })
+    const r = await call('act_window', { window: W, steps: [{ key: 'ctrl+l' }, { type: 'x' }, { key: 'Return' }], then: 'none' }, context(backend))
+    expect(r.isError).toBe(true)
+    expect(textOf(r)).toBe(
+      '1 ok key ctrl+l\n2 unknown type (1 characters): the desktop server failed (MCP error -32000: Connection closed); this step may have run. Look before retrying.\nStopped; steps 3–3 not run.',
+    )
+  })
+
+  it('gives the reason from error when a step fails without a message', async () => {
+    const { backend } = fakeBackend({
+      activate_window: () => parseResult({ isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'window not found', permissions_hint: 'Run read_windows.' }) }] }),
+    })
+    const r = await call('act_window', { window: W, steps: [{ focus: true }], then: 'none' }, context(backend))
+    expect(textOf(r)).toContain('1 failed focus: window not found Run read_windows.')
+  })
+
+  it('acts in windows whose position the compositor does not know (niri)', async () => {
+    const { backend } = fakeBackend({ list_windows: () => ok({ windows: [{ window_id: W, app_id: 'app', pid: 1, bounds: { x: null, y: null, width: 800, height: 600 } }] }), press_key: done })
+    expect(textOf(await call('act_window', { window: W, steps: [{ key: 'q' }], then: 'none' }, context(backend)))).toBe('1 ok key q')
+  })
+
+  it('says why the window list failed instead of calling the window gone', async () => {
+    const { backend, calls } = fakeBackend({ list_windows: () => ok({ windows: [], error: 'GNOME Shell refused the call.', permissions_hint: 'Install the window extension.' }), press_key: done })
+    const ctx = context(backend)
+    expect(textOf(await call('read_windows', {}, ctx))).toBe('Could not list windows: GNOME Shell refused the call. Install the window extension.')
+    expect(textOf(await call('act_window', { window: W, steps: [{ key: 'q' }] }, ctx))).toBe('Nothing sent: could not list windows: GNOME Shell refused the call. Install the window extension.')
+    expect(calls).toEqual([])
   })
 
   it('shows the tree again after acting in a window that was read', async () => {

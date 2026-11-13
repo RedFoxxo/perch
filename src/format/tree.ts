@@ -51,11 +51,13 @@ export function formatTree(nodes: TreeNode[]): string {
     let next = depth
     if (shown) {
       const flags: string[] = []
-      if (!states.has('enabled') || !states.has('sensitive')) flags.push('disabled')
+      // Toolkits drop both for a disabled control; a page tab can be enabled without being sensitive.
+      if (!states.has('enabled') && !states.has('sensitive')) flags.push('disabled')
       for (const s of SHOWN_STATES) if (states.has(s)) flags.push(s)
       let line = `${'  '.repeat(depth)}[e${node.index} ${node.role}${node.name ? ` ${JSON.stringify(node.name)}` : ''}${flags.length ? ` ${flags.join(' ')}` : ''}]`
       if (text && text !== node.name) line += ` ${JSON.stringify(text)}`
       if (node.value?.text) line += ` = ${JSON.stringify(node.value.text)}`
+      else if (node.value?.current != null) line += ` = ${node.value.current}`
       lines.push(line)
       next = depth + 1
     }

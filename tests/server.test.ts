@@ -17,10 +17,23 @@ async function listTools() {
 }
 
 describe('server', () => {
-  it('lists five tools, reads marked read-only', async () => {
+  it('lists five tools; only those that never change the screen are read-only', async () => {
     const { tools } = await listTools()
     expect(tools.map((t) => t.name)).toEqual(['read_windows', 'read_window', 'read_screenshot', 'read_status', 'act_window'])
-    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(t.name.startsWith('read_'))
+    const readOnly = tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name)
+    // A window screenshot raises the window outside Hyprland's background mode.
+    expect(readOnly).toEqual(['read_windows', 'read_window', 'read_status'])
+  })
+
+  it('rejects a step that mixes kinds before anything is sent', async () => {
+    const { backend, calls } = fakeBackend({})
+    const server = createServer(context(backend))
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(a), client.connect(b)])
+    const r = await client.callTool({ name: 'act_window', arguments: { window: 7, steps: [{ type: 'x', click: 'e1' }] } })
+    expect(r.isError).toBe(true)
+    expect(calls).toEqual([])
   })
 
   // computer-use-linux lists 19 tools in 67.8 KB plus 7.6 KB of instructions; perch exists to cost a fraction of that.

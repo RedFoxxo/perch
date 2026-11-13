@@ -38,11 +38,14 @@ export function parseResult(result: { content?: Content[]; isError?: boolean }):
     // Not JSON: keep the text.
   }
   const outcome = Outcome.safeParse(data)
-  const message = outcome.success ? outcome.data.message : undefined
+  const said = outcome.success ? [outcome.data.message, outcome.data.error, outcome.data.permissions_hint] : []
+  const failed = Boolean(result.isError) || (outcome.success && outcome.data.ok === false)
+  // A failure's reason may be in `error` and `permissions_hint` instead of `message`.
+  const reason = failed ? said.filter(Boolean).join(' ') : said[0]
   return {
-    ok: !result.isError && !(outcome.success && outcome.data.ok === false),
+    ok: !failed,
     data,
-    message: (message ?? (typeof data === 'string' ? data : '')).trim(),
+    message: (reason || (typeof data === 'string' ? data : '')).trim(),
     images: content.flatMap((c) => (c.type === 'image' && c.data ? [{ data: c.data, mimeType: c.mimeType ?? 'image/png' }] : [])),
   }
 }
@@ -68,7 +71,8 @@ export function linuxBackend(agentName: () => string | undefined): Backend {
       command: process.execPath,
       args: [computerUseLinuxCli(), 'mcp'],
       env,
-      stderr: 'ignore',
+      // The wrapper explains failed downloads and missing binaries on stderr; it ends up in the client's log.
+      stderr: 'inherit',
     })
     const c = new Client({ name: 'perch', version: VERSION })
     transport.onclose = () => {

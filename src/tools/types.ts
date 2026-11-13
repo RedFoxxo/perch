@@ -27,6 +27,8 @@ export interface ToolDef<S extends z.ZodRawShape = z.ZodRawShape> {
   /** `read_` tools only look; `act_` tools change something. */
   name: `read_${string}` | `act_${string}`
   description: string
+  /** The tool may bring a window to the front, so it is not read-only to the client. */
+  raises?: true
   input: S
   handler: (args: z.output<z.ZodObject<S>>, ctx: ToolContext) => Promise<ToolOutput>
 }

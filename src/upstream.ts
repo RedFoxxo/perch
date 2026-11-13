@@ -3,7 +3,18 @@ import { z } from 'zod'
 // The parts of computer-use-linux's answers perch reads. Everything else is ignored,
 // so new upstream fields never break perch; a renamed field fails the parse loudly.
 
-export const Outcome = z.object({ ok: z.boolean().optional(), message: z.string().optional() }).loose()
+/**
+ * Any answer: whether it worked, and why not. Some tools give the reason in `error` (and a hint in
+ * `permissions_hint`) instead of `message`.
+ */
+export const Outcome = z
+  .object({
+    ok: z.boolean().optional(),
+    message: z.string().nullish(),
+    error: z.string().nullish(),
+    permissions_hint: z.string().nullish(),
+  })
+  .loose()
 
 export const Window = z
   .object({
@@ -14,12 +25,19 @@ export const Window = z
     focused: z.boolean().nullish(),
     hidden: z.boolean().nullish(),
     workspace: z.union([z.string(), z.number()]).nullish(),
-    bounds: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).nullish(),
+    // Some window backends (niri) don't know a window's position: x and y are null there.
+    bounds: z.object({ x: z.number().nullish(), y: z.number().nullish(), width: z.number().nullish(), height: z.number().nullish() }).nullish(),
   })
   .loose()
 export type Window = z.infer<typeof Window>
 
-export const WindowList = z.object({ windows: z.array(Window), note: z.string().nullish() }).loose()
+/** `list_windows`: when listing fails it still answers, with no windows and the reason in `error`. */
+export const WindowList = z
+  .object({ windows: z.array(Window), note: z.string().nullish(), error: z.string().nullish(), permissions_hint: z.string().nullish() })
+  .loose()
+
+/** `focused_window`: null when no window has the focus. */
+export const FocusedWindow = z.object({ focused_window: Window.nullish() }).loose()
 
 export const TreeNode = z
   .object({
@@ -41,6 +59,7 @@ export const AppState = z
     snapshot_id: z.string().nullish(),
     accessibility_tree: z.array(TreeNode).nullish(),
     accessibility_tree_spill: z.object({ path: z.string() }).loose().nullish(),
+    accessibility_tree_truncated: z.boolean().nullish(),
     accessibility_error: z.string().nullish(),
     window_error: z.string().nullish(),
   })

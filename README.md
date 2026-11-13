@@ -26,13 +26,15 @@ What it does for the agent:
   into the server's element index and snapshot.
 - **Screenshot pixels.** `[x, y]` in `act_window` are pixels of the window's
   last `read_screenshot`; perch converts them.
-- **Your screen stays yours.** Clicking an element whose primary action is
-  click, press or toggle runs that action, and keys go to the window
-  without focusing it (Hyprland), so a test app on a hidden workspace never
-  comes to the front. Other elements (a table cell that expands or edits)
-  are refused with their action names, to use as an `action` step. Mouse
-  steps need an explicit `focus` step, and keys for the focused window are
-  refused if you moved the focus.
+- **Your screen stays yours where it can.** Clicking an element whose
+  primary action is click, press or toggle runs that action without
+  focusing the window, on every desktop. On Hyprland, keys and window
+  screenshots also stay in the background, so a test app on a hidden
+  workspace never comes to the front; elsewhere both bring the window
+  forward. Other elements (a table cell that expands or edits) are refused
+  with their action names, to use as an `action` step. Mouse steps need an
+  explicit `focus` step, and keys for the focused window are refused if you
+  moved the focus.
 - **Reused window ids.** If a window closed and another app got its id,
   `act_window` refuses instead of acting in the wrong app.
 - **Typed text is never echoed** in results.
@@ -41,7 +43,7 @@ Size, measured against computer-use-linux 0.7.53 on Thunar:
 
 | | computer-use-linux | perch |
 |---|---|---|
-| Tool list | 19 tools, 67.8 KB | 5 tools, 6.2 KB |
+| Tool list | 19 tools, 67.8 KB | 5 tools, 6.1 KB |
 | Server instructions | 7.6 KB | none |
 | One window's tree | 31.5 KB | 1.1 KB |
 

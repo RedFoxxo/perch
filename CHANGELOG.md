@@ -11,6 +11,10 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
   clicks without focusing the window (only for click, press and toggle
   actions), mouse steps only after an explicit `focus` step, refusal when a
   window id was reused by another app, and the server's whole failure
-  message with its recovery hint.
+  reason (`message`, or `error` and its hint) with its recovery advice.
+- Drags take pixels of a whole-screen screenshot, so they land right with
+  scaled or several monitors. A failing window list, an unreadable window
+  and a cut-short tree are reported instead of looking empty. Steps already
+  sent are reported when the desktop server fails midway.
 - `perch setup-window-targeting` installs GNOME's Shell extension with the
   computer-use-linux perch runs, so setup tools need no second pin.
