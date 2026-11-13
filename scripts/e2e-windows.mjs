@@ -1,25 +1,34 @@
 // End-to-end check on a real Windows desktop (CI's windows-latest, or a colleague's PC). It compiles
-// a small WinForms test app with the C# compiler built into Windows, drives it and classic Notepad
-// through perch's five tools, prints every answer and its time, and exits 1 if any check fails.
-// Run `npm run build` first.
+// a small WinForms test app with the C# compiler built into Windows, drives it and Notepad (on a new
+// file of its own) through perch's five tools, prints every answer and its time, and exits 1 if any
+// check fails. It refuses to start while another Notepad window is open, since it types into
+// Notepad and closes the Notepad process it used. Run `npm run build` first.
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
-// A window with a click counter, a check box and a big button filling the rest; `fg <file>` writes
-// the foreground window's handle to the file (a GUI program has no console to print to).
+// A window with a click counter, a check box and a big button filling the rest. `fg <file>` writes
+// the foreground window's handle to the file, `pid <window> <file>` the window's process id (a GUI
+// program has no console to print to).
 const APP = `
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 class PerchTest {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
   [STAThread] static void Main(string[] args) {
     if (args.Length > 1 && args[0] == "fg") { System.IO.File.WriteAllText(args[1], GetForegroundWindow().ToInt64().ToString()); return; }
+    if (args.Length > 2 && args[0] == "pid") {
+      uint pid;
+      GetWindowThreadProcessId(new IntPtr(long.Parse(args[1])), out pid);
+      System.IO.File.WriteAllText(args[2], pid.ToString());
+      return;
+    }
     var form = new Form { Text = "perch test", Width = 500, Height = 400 };
     var count = 0;
     var status = new Label { Text = "clicks 0", Dock = DockStyle.Top, Height = 30 };
@@ -43,13 +52,17 @@ if (built.status !== 0) {
   console.log(`FAIL: could not compile the test app with ${csc}:\n${built.stdout}${built.stderr}`)
   process.exit(1)
 }
-const foreground = () => {
-  const file = join(dir, 'fg.txt')
-  // A failed helper run must fail the read, not return the handle from the previous one.
+/** What the helper wrote for `args`; a failed run fails the read instead of returning an old answer. */
+const helper = (...args) => {
+  const file = join(dir, 'answer.txt')
   rmSync(file, { force: true })
-  spawnSync(app, ['fg', file])
+  spawnSync(app, [...args, file])
   return readFileSync(file, 'utf8').trim()
 }
+const foreground = () => helper('fg')
+// Notepad gets a new file of its own, so its window is told apart by title.
+const docName = `${basename(dir)}.txt`
+writeFileSync(join(dir, docName), '')
 
 const server = join(import.meta.dirname, '..', 'build', 'index.js')
 const client = new Client({ name: 'perch-e2e', version: '0' })
@@ -69,17 +82,26 @@ function check(ok, what) {
   if (!ok) failures++
   return ok
 }
-async function findWindow(app) {
+async function findWindow(app, title = '') {
   for (let i = 0; i < 20; i++) {
     const list = await tool('read_windows')
-    const id = new RegExp(`^(\\d+) ${app} `, 'im').exec(list.text)?.[1]
+    const id = new RegExp(`^(\\d+) ${app} ".*${title}`, 'im').exec(list.text)?.[1]
     if (id) return Number(id)
     await sleep(500)
   }
-  throw new Error(`no ${app} window`)
+  throw new Error(`no ${app} window${title ? ` titled ${title}` : ''}`)
 }
 const ref = (tree, pattern) => new RegExp(`\\[(e\\d+) ${pattern}`).exec(tree)?.[1]
 
+// Windows 11 opens a new file as a tab of a Notepad window that is already open, and the check
+// types into that window and closes its process at the end: never start next to the user's Notepad.
+if (/^\d+ notepad /im.test((await tool('read_windows')).text)) {
+  console.log('FAIL: close every Notepad window first (save your work): this check types into Notepad and closes it.')
+  await client.close()
+  process.exit(1)
+}
+
+let notepadPid
 spawn(app, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref()
 try {
   const status = await tool('read_status')
@@ -87,8 +109,9 @@ try {
 
   // --- The test app, behind Notepad: background steps must leave Notepad in front. ---
   const testApp = await findWindow('perchtest')
-  spawn('notepad.exe', [], { detached: true, stdio: 'ignore' }).unref()
-  const notepad = await findWindow('notepad')
+  spawn('notepad.exe', [join(dir, docName)], { detached: true, stdio: 'ignore' }).unref()
+  const notepad = await findWindow('notepad', docName.replace(/\.txt$/, ''))
+  notepadPid = helper('pid', String(notepad))
   await sleep(1000)
   const front = foreground()
   check(front === String(notepad), `Notepad is in front before the background steps (foreground ${front})`)
@@ -155,7 +178,8 @@ try {
   console.log(`FAIL: ${error instanceof Error ? error.message : String(error)}`)
   failures++
 } finally {
-  spawnSync('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' })
+  // Only the Notepad process this check started (its file has unsaved test text), and the test app.
+  if (notepadPid) spawnSync('taskkill', ['/PID', notepadPid, '/F'], { stdio: 'ignore' })
   spawnSync('taskkill', ['/IM', 'perchtest.exe', '/F'], { stdio: 'ignore' })
   await client.close()
 }
