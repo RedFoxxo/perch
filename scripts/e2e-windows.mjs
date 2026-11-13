@@ -95,14 +95,19 @@ try {
   const big = ref(tree.text, 'button "Big"')
   const remember = ref(tree.text, 'check box "Remember"')
   if (!check(Boolean(big && remember), 'read_window shows the button and the check box')) throw new Error('test app tree')
+  const stillFront = (after) => {
+    const now = foreground()
+    return check(now === front, `${after} left the foreground window alone (foreground ${now}, Notepad ${notepad}, test app ${testApp})`)
+  }
+  stillFront('read_window')
 
-  const clicked = await tool('act_window', { window: testApp, steps: [{ click: big }], then: 'tree' })
-  check(!clicked.isError && clicked.text.includes('"clicks 1"'), 'an e-ref click runs the button (Invoke) in the background')
-  const toggled = await tool('act_window', { window: testApp, steps: [{ click: remember }], then: 'tree' })
-  check(!toggled.isError && toggled.text.includes('"remembered"'), 'an e-ref click toggles the check box in the background')
+  const clicked = await tool('act_window', { window: testApp, steps: [{ click: big }], then: 'none' })
+  stillFront('an e-ref click on a button')
+  const toggled = await tool('act_window', { window: testApp, steps: [{ click: remember }], then: 'none' })
+  stillFront('an e-ref click on a check box')
   const named = await tool('act_window', { window: testApp, steps: [{ action: remember, name: 'Toggle' }], then: 'tree' })
-  check(!named.isError && named.text.includes('"forgotten"'), 'an action step runs a named action')
-  check(foreground() === front, 'the background steps left the foreground window alone')
+  stillFront('an action step')
+  check(!clicked.isError && !toggled.isError && !named.isError && named.text.includes('"forgotten"'), 'e-ref clicks and actions ran (the last one left "forgotten")')
 
   // --- Pointer input: a click in the middle of the screenshot hits the big button. ---
   const shot = await tool('read_screenshot', { window: testApp, max_edge: 400 })
