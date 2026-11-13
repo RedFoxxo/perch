@@ -26,11 +26,13 @@ What it does for the agent:
   into the server's element index and snapshot.
 - **Screenshot pixels.** `[x, y]` in `act_window` are pixels of the window's
   last `read_screenshot`; perch converts them.
-- **Your screen stays yours.** Element clicks run the element's own action,
-  and keys go to the window without focusing it (Hyprland), so a test app on
-  a hidden workspace never comes to the front. Mouse steps need an explicit
-  `focus` step, and keys for the focused window are refused if you moved the
-  focus.
+- **Your screen stays yours.** Clicking an element whose primary action is
+  click, press or toggle runs that action, and keys go to the window
+  without focusing it (Hyprland), so a test app on a hidden workspace never
+  comes to the front. Other elements (a table cell that expands or edits)
+  are refused with their action names, to use as an `action` step. Mouse
+  steps need an explicit `focus` step, and keys for the focused window are
+  refused if you moved the focus.
 - **Reused window ids.** If a window closed and another app got its id,
   `act_window` refuses instead of acting in the wrong app.
 - **Typed text is never echoed** in results.

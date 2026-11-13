@@ -15,7 +15,10 @@ export async function readWindow(window: number, ctx: ToolContext): Promise<Tool
   const nodes = state.accessibility_tree_spill
     ? z.array(TreeNode).parse(JSON.parse(readFileSync(state.accessibility_tree_spill.path, 'utf8')))
     : (state.accessibility_tree ?? [])
-  if (state.snapshot_id) ctx.session.snapshot = { window, id: state.snapshot_id }
+  if (state.snapshot_id) {
+    const actions = new Map(nodes.flatMap((n) => (n.actions?.length ? [[n.index, n.actions] as const] : [])))
+    ctx.session.snapshot = { window, id: state.snapshot_id, actions }
+  }
   const tree = formatTree(nodes)
   if (!tree) {
     return text(

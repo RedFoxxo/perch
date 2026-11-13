@@ -37,10 +37,10 @@ describe('server', () => {
 })
 
 describe('parseResult', () => {
-  it('treats ok: false in the answer as a failure and keeps the first sentence of its message', () => {
+  it('treats ok: false in the answer as a failure and keeps the whole message, recovery hint included', () => {
     const r = parseResult({ content: [{ type: 'text', text: JSON.stringify({ ok: false, message: 'click was not sent: stale. Call get_app_state.' }) }] })
     expect(r.ok).toBe(false)
-    expect(r.message).toBe('click was not sent: stale.')
+    expect(r.message).toBe('click was not sent: stale. Call get_app_state.')
   })
 
   it('treats isError as a failure even without JSON, and passes images on', () => {

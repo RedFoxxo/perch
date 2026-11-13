@@ -13,9 +13,16 @@ async function call(name: string, args: Record<string, unknown>, ctx: ToolContex
 const textOf = (r: ToolOutput) => r.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n')
 
 const tree = (snapshot: string) => () =>
-  ok({ snapshot_id: snapshot, accessibility_tree: [{ index: 1, role: 'frame', name: 'App', states: ['enabled', 'sensitive', 'showing'] }, { index: 5, parent_index: 1, role: 'button', name: 'Save', states: ['enabled', 'sensitive', 'showing'] }] })
+  ok({
+    snapshot_id: snapshot,
+    accessibility_tree: [
+      { index: 1, role: 'frame', name: 'App', states: ['enabled', 'sensitive', 'showing'] },
+      { index: 5, parent_index: 1, role: 'button', name: 'Save', states: ['enabled', 'sensitive', 'showing'], actions: ['click'] },
+      { index: 6, parent_index: 1, role: 'table cell', name: 'Places', states: ['enabled', 'sensitive', 'showing'], actions: ['expand or contract', 'edit', 'activate'] },
+    ],
+  })
 const done = () => ok({ ok: true, message: 'Action sent.' })
-// Built the way the real backend answers, so messages are cut to their first sentence.
+// Built the way the real backend answers.
 const failed = (message: string) => () => parseResult({ content: [{ type: 'text', text: JSON.stringify({ ok: false, message }) }] })
 
 describe('act_window', () => {
@@ -26,7 +33,17 @@ describe('act_window', () => {
     const r = await call('act_window', { window: W, steps: [{ click: 'e5' }], then: 'none' }, ctx)
     expect(textOf(r)).toBe('1 ok click e5')
     // perform_action never focuses or raises the window; a pointer click on a hidden workspace would show it to the user.
-    expect(calls.at(-1)).toEqual({ tool: 'perform_action', args: { window_id: W, element_index: 5, snapshot_id: 'snap-1' } })
+    expect(calls.at(-1)).toEqual({ tool: 'perform_action', args: { window_id: W, element_index: 5, snapshot_id: 'snap-1', action: 'click' } })
+  })
+
+  it('refuses to click an element whose primary action is not a click, rather than expanding or editing it', async () => {
+    const { backend, calls } = fakeBackend({ get_app_state: tree('snap-1'), perform_action: done })
+    const ctx = context(backend)
+    await call('read_window', { window: W }, ctx)
+    const r = await call('act_window', { window: W, steps: [{ click: 'e6' }], then: 'none' }, ctx)
+    expect(r.isError).toBe(true)
+    expect(textOf(r)).toContain(`refused click e6: e6 can't be clicked in the background (its actions are "expand or contract", "edit", "activate")`)
+    expect(calls.map((c) => c.tool)).toEqual(['get_app_state'])
   })
 
   it('uses the pointer for right and double clicks, after a focus step', async () => {
@@ -96,7 +113,7 @@ describe('act_window', () => {
     const { backend, calls } = fakeBackend({ press_key: done, type_text: failed('Did not send input: the active keymap is not US. More detail.') })
     const r = await call('act_window', { window: W, steps: [{ key: 'ctrl+l' }, { type: 'é' }, { key: 'Return' }], then: 'none' }, context(backend))
     expect(r.isError).toBe(true)
-    expect(textOf(r)).toBe('1 ok key ctrl+l\n2 failed type (1 characters): Did not send input: the active keymap is not US.\nStopped; steps 3–3 not run.')
+    expect(textOf(r)).toBe('1 ok key ctrl+l\n2 failed type (1 characters): Did not send input: the active keymap is not US. More detail.\nStopped; steps 3–3 not run.')
     expect(calls.map((c) => c.tool)).toEqual(['press_key', 'type_text'])
   })
 
@@ -137,6 +154,6 @@ describe('act_window', () => {
     const ctx = context(backend)
     await call('read_window', { window: W }, ctx)
     const r = await call('act_window', { window: W, steps: [{ click: 'e5' }] }, ctx)
-    expect(textOf(r)).toBe('1 ok click e5\n[e1 frame "App"]\n  [e5 button "Save"]')
+    expect(textOf(r)).toBe('1 ok click e5\n[e1 frame "App"]\n  [e5 button "Save"]\n  [e6 table cell "Places"]')
   })
 })

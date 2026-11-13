@@ -15,7 +15,7 @@ export interface BackendResult {
   ok: boolean
   /** The parsed JSON of the first text block, or its raw text when it is not JSON; parse it before use. */
   data: unknown
-  /** The first sentence of the server's `message` (or its text), for failures. */
+  /** The server's whole `message` (or its text): failures need its recovery hint, which often comes last. */
   message: string
   images: { data: string; mimeType: string }[]
 }
@@ -42,14 +42,9 @@ export function parseResult(result: { content?: Content[]; isError?: boolean }):
   return {
     ok: !result.isError && !(outcome.success && outcome.data.ok === false),
     data,
-    message: firstSentence(message ?? (typeof data === 'string' ? data : '')),
+    message: (message ?? (typeof data === 'string' ? data : '')).trim(),
     images: content.flatMap((c) => (c.type === 'image' && c.data ? [{ data: c.data, mimeType: c.mimeType ?? 'image/png' }] : [])),
   }
-}
-
-export function firstSentence(text: string): string {
-  const match = text.match(/^[\s\S]*?[.!?](?=\s|$)/)
-  return (match ? match[0] : text).trim()
 }
 
 /**

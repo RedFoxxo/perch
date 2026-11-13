@@ -102,6 +102,9 @@ function labelOf(step: Step): string {
   return `wait ${step.wait} ms`
 }
 
+/** Primary actions that mean "click"; the server substitutes only these for a pointer click too. */
+const CLICK_ACTIONS: Record<string, true> = { click: true, press: true, toggle: true }
+
 /** Steps that move the real pointer: the window, and its workspace, must be on screen, so they come to the front. */
 function usesPointer(step: Step): boolean {
   if ('click' in step) return typeof step.click !== 'string' || (step.button ?? 'left') !== 'left' || (step.count ?? 1) !== 1
@@ -115,9 +118,17 @@ async function run(step: Step, window: number, ctx: ToolContext, focused: boolea
     throw new Refused('this step uses the mouse, which brings the window (and its workspace) in front of the user: add { focus: true } before it.')
   }
   if ('click' in step) {
-    // A plain click on an element runs its own action, which neither focuses nor raises the window.
+    // A plain click on an element runs its own action, which neither focuses nor raises the window,
+    // but only when that action is a click; otherwise it would expand, edit or activate instead.
     if (!usesPointer(step) && typeof step.click === 'string') {
-      return backend.call('perform_action', { window_id: window, ...element(step.click, window, ctx) })
+      const el = element(step.click, window, ctx)
+      const actions = ctx.session.snapshot?.actions.get(el.element_index) ?? []
+      const primary = actions[0]
+      if (primary === undefined || !CLICK_ACTIONS[primary.toLowerCase()]) {
+        const has = actions.length ? `its actions are ${actions.map((a) => JSON.stringify(a)).join(', ')}` : 'it has no actions'
+        throw new Refused(`${step.click} can't be clicked in the background (${has}): use { action: "${step.click}", name } or a focus step and a click on a screenshot point.`)
+      }
+      return backend.call('perform_action', { window_id: window, ...el, action: primary })
     }
     return backend.call('click', { window_id: window, ...target(step.click, window, ctx), button: step.button, click_count: step.count })
   }

@@ -5,8 +5,11 @@ import type { Window } from '../upstream.js'
 
 /** What perch remembers between calls, so the agent passes short refs instead of ids and scales. */
 export interface Session {
-  /** The server keeps one tree at a time: element refs belong to this window's last `read_window`. */
-  snapshot?: { window: number; id: string }
+  /**
+   * The server keeps one tree at a time: element refs belong to this window's last `read_window`.
+   * `actions` holds each element's action names, first is the primary one.
+   */
+  snapshot?: { window: number; id: string; actions: Map<number, string[]> }
   /** Per window (or `screen`), how the last screenshot maps image pixels to capture pixels. */
   screenshots: Map<number | 'screen', { scale: number }>
   /** The last `read_windows` answer, for window positions. */

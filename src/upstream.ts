@@ -28,6 +28,8 @@ export const TreeNode = z
     role: z.string(),
     name: z.string().nullish(),
     states: z.array(z.string()).nullish(),
+    /** Action names, first is the primary one. */
+    actions: z.array(z.string()).nullish(),
     text: z.object({ content: z.string().nullish() }).loose().nullish(),
     value: z.object({ text: z.string().nullish(), current: z.number().nullish() }).loose().nullish(),
   })
