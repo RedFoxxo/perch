@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
 import { computerUseLinuxCli, linuxBackend, unsupportedBackend } from './backend.js'
 import { createServer } from './server.js'
 import { newSession } from './tools/types.js'
@@ -16,8 +17,26 @@ function runSetup(command: string): never {
     process.stderr.write(`perch: ${command} is for Linux desktops.\n`)
     process.exit(1)
   }
-  const r = spawnSync(process.execPath, [computerUseLinuxCli(), command], { stdio: 'inherit' })
-  process.exit(r.status ?? 1)
+  const r = spawnSync(process.execPath, [computerUseLinuxCli(), command], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' })
+  // computer-use-linux prints a JSON report and exits 0 even when the setup failed; its
+  // enable_command says whether the extension got enabled.
+  const report = SetupReport.safeParse(parseJson(r.stdout ?? ''))
+  if (!report.success) {
+    process.stdout.write(r.stdout ?? '')
+    process.exit(r.status ?? 1)
+  }
+  process.stdout.write(`${report.data.message}\n`)
+  process.exit(report.data.enable_command.ok ? 0 : 1)
+}
+
+const SetupReport = z.object({ message: z.string(), enable_command: z.object({ ok: z.boolean() }).loose() }).loose()
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
 }
 
 async function main(): Promise<void> {
