@@ -129,8 +129,12 @@ try {
   const bg = await tool('act_window', { window: notepad, steps: [{ type: 'perch was here' }], then: 'tree' })
   check(!bg.isError && bg.text.includes('perch was here'), 'background typing reaches the text field')
   check(foreground() === String(testApp), 'background typing left the foreground window alone')
+  const beforeSet = foreground()
   const set = await tool('act_window', { window: notepad, steps: [{ set: edit, value: 'replaced' }], then: 'tree' })
   check(!set.isError && set.text.includes('= "replaced"'), 'set replaces the field value')
+  const setMoved = foreground() !== beforeSet
+  const setReported = set.text.includes('the app came to the front')
+  check(setMoved === setReported, `set: ${setMoved ? 'brought the window forward' : 'left the foreground window alone'}, and perch ${setReported ? 'said' : 'said nothing'}`)
   const focused = await tool('act_window', {
     window: notepad,
     steps: [{ focus: true }, { key: 'ctrl+End', focused: true }, { type: ' and more', focused: true }],
