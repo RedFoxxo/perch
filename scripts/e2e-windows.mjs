@@ -3,7 +3,7 @@
 // through perch's five tools, prints every answer and its time, and exits 1 if any check fails.
 // Run `npm run build` first.
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -45,6 +45,8 @@ if (built.status !== 0) {
 }
 const foreground = () => {
   const file = join(dir, 'fg.txt')
+  // A failed helper run must fail the read, not return the handle from the previous one.
+  rmSync(file, { force: true })
   spawnSync(app, ['fg', file])
   return readFileSync(file, 'utf8').trim()
 }
