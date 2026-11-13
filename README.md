@@ -32,12 +32,14 @@ What it does for the agent:
 - **Your screen stays yours where it can.** Clicking an element whose
   primary action is click, press or toggle (Windows: invoke, select or
   toggle) runs that action without focusing the window, on every Linux
-  desktop. On Windows, WinForms buttons and check boxes (and likely other
-  classic controls) bring their window forward when UI Automation clicks
-  them; the step then says "the app came to the front". On Hyprland and Windows, keys and window
-  screenshots stay in the background, so a test app on a hidden workspace
-  or behind other windows doesn't come to the front; elsewhere both bring
-  the window forward. Other elements (a table cell that expands or edits)
+  desktop. On Windows, classic controls come forward when UI Automation
+  acts on them: in CI, a WinForms button and check box (click, `action`)
+  and Notepad's text field (`set`) all brought their window to the front.
+  The step then says "the app came to the front". On Hyprland and Windows,
+  keys and window screenshots stay in the background, so a test app on a
+  hidden workspace or behind other windows doesn't come to the front;
+  elsewhere both bring the window forward. Other elements (a table cell
+  that expands or edits)
   are refused with their action names, to use as an `action` step. Mouse
   steps need an explicit `focus` step, and keys for the focused window are
   refused if you moved the focus.

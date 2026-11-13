@@ -113,8 +113,13 @@ try {
   await background('an e-ref click on a check box (Toggle)', { click: remember }, '"remembered"')
   await background('an action step', { action: remember, name: 'Toggle' }, '"forgotten"')
 
-  // --- Pointer input: a click in the middle of the screenshot hits the big button. ---
+  // --- A screenshot of a window behind Notepad must leave Notepad in front. ---
+  await tool('act_window', { window: notepad, steps: [{ focus: true }], then: 'none' })
+  const beforeShot = foreground()
   const shot = await tool('read_screenshot', { window: testApp, max_edge: 400 })
+  check(foreground() === beforeShot, `a window screenshot left the foreground window alone (foreground ${foreground()}, before ${beforeShot})`)
+
+  // --- Pointer input: a click in the middle of the screenshot hits the big button. ---
   const size = /(\d+)×(\d+) px/.exec(shot.text)
   check(shot.images === 1 && size && Math.max(Number(size[1]), Number(size[2])) <= 400, 'window screenshot fits max_edge')
   if (size) {
