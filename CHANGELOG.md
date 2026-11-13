@@ -12,3 +12,5 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
   actions), mouse steps only after an explicit `focus` step, refusal when a
   window id was reused by another app, and the server's whole failure
   message with its recovery hint.
+- `perch setup-window-targeting` installs GNOME's Shell extension with the
+  computer-use-linux perch runs, so setup tools need no second pin.

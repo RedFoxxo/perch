@@ -47,16 +47,17 @@ export function parseResult(result: { content?: Content[]; isError?: boolean }):
   }
 }
 
-/**
- * computer-use-linux, started on first use through its npm wrapper (which also
- * downloads the binary if npm skipped the install script). Restarted if it exits.
- */
+/** The npm wrapper of the computer-use-linux perch depends on; it downloads the binary if npm skipped the install script. */
+export function computerUseLinuxCli(): string {
+  const pkg = createRequire(import.meta.url).resolve('@agent-sh/computer-use-linux/package.json')
+  return join(dirname(pkg), 'npm', 'bin', 'computer-use-linux.js')
+}
+
+/** computer-use-linux as an MCP server, started on first use and restarted if it exits. */
 export function linuxBackend(agentName: () => string | undefined): Backend {
   let client: Promise<Client> | undefined
 
   const start = async (): Promise<Client> => {
-    const require = createRequire(import.meta.url)
-    const pkg = require.resolve('@agent-sh/computer-use-linux/package.json')
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
     // Background keys and window captures on Hyprland: on unless the user set 0.
@@ -65,7 +66,7 @@ export function linuxBackend(agentName: () => string | undefined): Backend {
     if (name && !env.COMPUTER_USE_LINUX_AGENT_NAME) env.COMPUTER_USE_LINUX_AGENT_NAME = name
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [join(dirname(pkg), 'npm', 'bin', 'computer-use-linux.js'), 'mcp'],
+      args: [computerUseLinuxCli(), 'mcp'],
       env,
       stderr: 'ignore',
     })

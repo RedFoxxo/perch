@@ -66,6 +66,14 @@ describes: accessibility on, and an input backend.
 
 Other `COMPUTER_USE_LINUX_*` variables pass through unchanged.
 
+On GNOME Wayland, computer-use-linux lists and focuses windows through a
+small Shell extension. Install it with the version perch runs, then log out
+and back in:
+
+```sh
+npx -y @redfoxxo/perch@1 setup-window-targeting
+```
+
 ## Develop
 
 ```sh
