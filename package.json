@@ -1,6 +1,6 @@
 {
   "name": "@redfoxxo/perch",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A small MCP server for desktop control: a few compact tools over computer-use-linux, built to keep the agent's context small.",
   "type": "module",
   "bin": {

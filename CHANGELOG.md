@@ -3,7 +3,7 @@
 Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal).
 
-## 0.1.0 — 2026-11-13
+## 1.0.0 — 2026-11-13
 
 - First version: five tools (`read_windows`, `read_window`, `read_screenshot`,
   `read_status`, `act_window`) over computer-use-linux 0.7.53 on Linux.

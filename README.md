@@ -50,7 +50,7 @@ Size, measured against computer-use-linux 0.7.53 on Thunar:
 ```json
 {
   "mcpServers": {
-    "perch": { "command": "npx", "args": ["-y", "@redfoxxo/perch@0"] }
+    "perch": { "command": "npx", "args": ["-y", "@redfoxxo/perch@1"] }
   }
 }
 ```
