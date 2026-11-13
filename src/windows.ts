@@ -36,6 +36,8 @@ const OpResponse = z
       .object({
         windowBounds: Frame.nullish(),
         screenshotPngBase64: z.string().optional(),
+        /** The focused element, when it belongs to this window's app: only the app in front has one. */
+        focusedSummary: z.string().optional(),
         treeLines: z.array(z.string()).optional(),
         elements: z.array(ElementRecord).optional(),
       })
@@ -89,6 +91,7 @@ const NOTCHES_PER_PAGE = 5
 const FLAG_FOREGROUND = 'OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOREGROUND_INPUT'
 const FLAG_FOCUS = 'OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOCUS_ACTIONS'
 const BACKGROUND_NOTE = 'background: some apps ignore it, check the result'
+const RAISED_NOTE = 'the app came to the front'
 
 /**
  * Every request states every gate, so the user's environment can't widen one. Background requests
@@ -163,6 +166,14 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
   let snapshots = 0
   /** Per window, its bounds when the last screenshot was taken: [x, y] points are relative to them. */
   const shots = new Map<number, Frame>()
+  /** Per window, whether its app had the keyboard focus, so was in front, at the last answer about it. */
+  const inFront = new Map<number, boolean>()
+
+  const op = async (request: OpRequest): Promise<OpResponse> => {
+    const res = await runtime.op(request)
+    if (request.windowId !== undefined && res.ok && res.snapshot) inFront.set(request.windowId, Boolean(res.snapshot.focusedSummary))
+    return res
+  }
 
   const record = (args: Record<string, unknown>): ElementRecord | BackendResult => {
     const r = snapshot?.id === args.snapshot_id ? snapshot?.records.get(args.element_index as number) : undefined
@@ -176,7 +187,7 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
   const boundsForPoints = async (window: number): Promise<Frame | BackendResult> => {
     const shot = shots.get(window)
     if (!shot) return failed(`read_screenshot window ${window} first.`)
-    const res = await runtime.op({ tool: 'get_window_state', windowId: window, include_screenshot: false, max_tree_nodes: 1, ...gates() })
+    const res = await op({ tool: 'get_window_state', windowId: window, include_screenshot: false, max_tree_nodes: 1, ...gates() })
     const now = res.ok ? res.snapshot?.windowBounds : undefined
     if (!now) return opFailure(res, `could not find window ${window}'s position.`)
     if (Math.abs(now.width - shot.width) > 1 || Math.abs(now.height - shot.height) > 1) {
@@ -185,9 +196,26 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
     return now
   }
 
+  /**
+   * Runs one action. Some background routes still bring the window forward (UI Automation clicks
+   * on classic Win32 and WinForms controls do), so a background step whose app was behind and now
+   * has the focus says so.
+   */
   const act = async (request: OpRequest, note?: string): Promise<BackendResult> => {
-    const res = await runtime.op(request)
-    return res.ok ? done({}, note) : opFailure(res, `${request.tool} failed.`)
+    const window = request.windowId
+    const before = window === undefined ? undefined : inFront.get(window)
+    const res = await op(request)
+    if (!res.ok) return opFailure(res, `${request.tool} failed.`)
+    if (window === undefined) return done({}, note)
+    if (request.allow_foreground_input || request.tool === 'activate_window') {
+      // Meant to come forward, which sends every other window behind; activate_window answers
+      // without a snapshot, so this one's state is unknown until the next answer about it.
+      for (const other of inFront.keys()) inFront.set(other, false)
+      inFront.delete(window)
+      return done({}, note)
+    }
+    const raised = before === false && inFront.get(window) === true
+    return done({}, [note, raised ? RAISED_NOTE : undefined].filter(Boolean).join('; ') || undefined)
   }
 
   const isResult = (v: unknown): v is BackendResult => typeof v === 'object' && v !== null && 'ok' in v && 'images' in v
@@ -201,7 +229,7 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
       png = await runtime.captureScreen()
       unitWidth = pngSize(png).width
     } else {
-      const res = await runtime.op({ tool: 'get_window_state', windowId: window, include_screenshot: true, max_tree_nodes: 1, ...gates() })
+      const res = await op({ tool: 'get_window_state', windowId: window, include_screenshot: true, max_tree_nodes: 1, ...gates() })
       if (!res.ok) return opFailure(res, `could not capture window ${window}.`)
       const bounds = res.snapshot?.windowBounds
       const data = res.snapshot?.screenshotPngBase64
@@ -230,7 +258,7 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
         return done({ windows: (res.windows ?? []).map((w) => ({ window_id: w.id, app_id: w.app, title: w.title ?? '' })) })
       }
       case 'get_app_state': {
-        const res = await runtime.op({ tool: 'get_window_state', windowId: window, include_screenshot: false, ...gates() })
+        const res = await op({ tool: 'get_window_state', windowId: window, include_screenshot: false, ...gates() })
         if (!res.ok || !res.snapshot) return opFailure(res, `could not read window ${window}.`)
         const records = res.snapshot.elements ?? []
         snapshot = { id: `w${++snapshots}`, window, records: new Map(records.map((r) => [r.index, r])) }

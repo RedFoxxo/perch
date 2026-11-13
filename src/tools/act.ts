@@ -170,7 +170,7 @@ export const actTools = [
     description:
       'Run steps in one window, in order, stopping at the first that fails: click, type, key, set, action, scroll, drag, focus, wait. ' +
       'Targets are e-refs from read_window or [x, y] pixels of its read_screenshot; drag takes pixels of a whole-screen read_screenshot (Windows: of the window\'s). ' +
-      'Element clicks, set and action never bring the window to the front; keys and typing don\'t on Hyprland and Windows (some Windows apps ignore them: check), elsewhere they focus it. ' +
+      'Element clicks, set and action don\'t bring the window to the front (Windows: classic controls may, and the step says so); keys and typing don\'t on Hyprland and Windows (some Windows apps ignore them: check), elsewhere they focus it. ' +
       'Mouse steps ([x, y] clicks, right or double clicks, scroll, drag) need a focus step first, which shows the window to the user. ' +
       'focused: true sends real keys to the focused window, refused if the focus moved. then: tree (default after read_window) or screenshot ' +
       '(brings the window forward except on Hyprland and Windows) shows the result.',

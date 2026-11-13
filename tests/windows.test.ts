@@ -24,7 +24,8 @@ const lines = ['\t0 window Untitled - Notepad', '\t\t1 menu bar Application', '\
 const bounds = { x: 100, y: 50, width: 2048, height: 1024 }
 const blank = encodeRgb(new Uint8Array(2048 * 1024 * 3), 2048, 1024)
 
-function fakeRuntime(windowBounds: () => typeof bounds = () => bounds) {
+/** `actionTakesFocus`: the app answers actions with the keyboard focus, as WinForms does for UI Automation clicks. */
+function fakeRuntime(windowBounds: () => typeof bounds = () => bounds, actionTakesFocus = false) {
   const requests: OpRequest[] = []
   const answer = (r: OpRequest): OpResponse => {
     if (r.tool === 'list_windows') return { ok: true, windows: [{ app: 'Notepad', id: W, title: 'Untitled - Notepad' }] }
@@ -39,7 +40,7 @@ function fakeRuntime(windowBounds: () => typeof bounds = () => bounds) {
         },
       }
     }
-    return { ok: true, snapshot: {} }
+    return { ok: true, snapshot: actionTakesFocus ? { focusedSummary: 'button Save' } : {} }
   }
   return {
     requests,
@@ -62,8 +63,8 @@ async function call(name: string, args: Record<string, unknown>, ctx: ToolContex
 }
 const textOf = (r: ToolOutput) => r.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join('\n')
 
-function setup(windowBounds?: () => typeof bounds) {
-  const fake = fakeRuntime(windowBounds)
+function setup(windowBounds?: () => typeof bounds, actionTakesFocus?: boolean) {
+  const fake = fakeRuntime(windowBounds, actionTakesFocus)
   return { ...fake, ctx: { backend: windowsBackend(fake.runtime), session: newSession() } }
 }
 
@@ -90,6 +91,14 @@ describe('Windows backend', () => {
     expect(textOf(r)).toBe('1 ok click e4')
     expect(requests.at(-1)).toMatchObject({ tool: 'perform_secondary_action', windowId: W, element: records[4], action: 'invoke', allow_foreground_input: false })
     expect(requests.at(-1)?.env_flags).toMatchObject({ [FOREGROUND]: '0', [FOCUS]: '0' })
+  })
+
+  it('says when a background click brought an app that was behind to the front', async () => {
+    const { ctx } = setup(undefined, true)
+    await call('read_window', { window: W }, ctx)
+    const r = await call('act_window', { window: W, steps: [{ click: 'e4' }, { click: 'e4' }], then: 'none' }, ctx)
+    // The second click finds the app already in front: nothing new to report.
+    expect(textOf(r)).toBe('1 ok click e4 (the app came to the front)\n2 ok click e4')
   })
 
   it('types in the background with the foreground gates closed, and says it may not arrive', async () => {

@@ -31,14 +31,16 @@ What it does for the agent:
   last `read_screenshot`; perch converts them.
 - **Your screen stays yours where it can.** Clicking an element whose
   primary action is click, press or toggle (Windows: invoke, select or
-  toggle) runs that action without focusing the window, on every desktop.
-  On Hyprland and Windows, keys and window screenshots also stay in the
-  background, so a test app on a hidden workspace or behind other windows
-  never comes to the front; elsewhere both bring the window forward. Other
-  elements (a table cell that expands or edits) are refused with their
-  action names, to use as an `action` step. Mouse steps need an explicit
-  `focus` step, and keys for the focused window are refused if you moved
-  the focus.
+  toggle) runs that action without focusing the window, on every Linux
+  desktop. On Windows, WinForms buttons and check boxes (and likely other
+  classic controls) bring their window forward when UI Automation clicks
+  them; the step then says "the app came to the front". On Hyprland and Windows, keys and window
+  screenshots stay in the background, so a test app on a hidden workspace
+  or behind other windows doesn't come to the front; elsewhere both bring
+  the window forward. Other elements (a table cell that expands or edits)
+  are refused with their action names, to use as an `action` step. Mouse
+  steps need an explicit `focus` step, and keys for the focused window are
+  refused if you moved the focus.
 - **Reused window ids.** If a window closed and another app got its id,
   `act_window` refuses instead of acting in the wrong app.
 - **Typed text is never echoed** in results.
