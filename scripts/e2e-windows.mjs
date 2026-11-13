@@ -1,11 +1,53 @@
-// End-to-end check on a real Windows desktop (CI's windows-latest, or a colleague's PC):
-// starts classic Notepad, drives it through perch's five tools, prints every answer and its time,
-// and exits 1 at the first answer that is wrong. Run `npm run build` first.
+// End-to-end check on a real Windows desktop (CI's windows-latest, or a colleague's PC). It compiles
+// a small WinForms test app with the C# compiler built into Windows, drives it and classic Notepad
+// through perch's five tools, prints every answer and its time, and exits 1 if any check fails.
+// Run `npm run build` first.
 import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+
+// A window with a click counter, a check box and a big button filling the rest; `fg <file>` writes
+// the foreground window's handle to the file (a GUI program has no console to print to).
+const APP = `
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+class PerchTest {
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [STAThread] static void Main(string[] args) {
+    if (args.Length > 1 && args[0] == "fg") { System.IO.File.WriteAllText(args[1], GetForegroundWindow().ToInt64().ToString()); return; }
+    var form = new Form { Text = "perch test", Width = 500, Height = 400 };
+    var count = 0;
+    var status = new Label { Text = "clicks 0", Dock = DockStyle.Top, Height = 30 };
+    var remember = new CheckBox { Text = "Remember", Dock = DockStyle.Top };
+    var big = new Button { Text = "Big", Dock = DockStyle.Fill };
+    big.Click += (s, e) => { count++; status.Text = "clicks " + count; };
+    remember.CheckedChanged += (s, e) => { status.Text = remember.Checked ? "remembered" : "forgotten"; };
+    form.Controls.Add(big);
+    form.Controls.Add(remember);
+    form.Controls.Add(status);
+    Application.Run(form);
+  }
+}`
+
+const dir = mkdtempSync(join(tmpdir(), 'perch-e2e-'))
+const app = join(dir, 'perchtest.exe')
+writeFileSync(join(dir, 'perchtest.cs'), APP)
+const csc = join(process.env.WINDIR ?? 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
+const built = spawnSync(csc, ['/nologo', '/target:winexe', `/out:${app}`, join(dir, 'perchtest.cs')], { encoding: 'utf8' })
+if (built.status !== 0) {
+  console.log(`FAIL: could not compile the test app with ${csc}:\n${built.stdout}${built.stderr}`)
+  process.exit(1)
+}
+const foreground = () => {
+  const file = join(dir, 'fg.txt')
+  spawnSync(app, ['fg', file])
+  return readFileSync(file, 'utf8').trim()
+}
 
 const server = join(import.meta.dirname, '..', 'build', 'index.js')
 const client = new Client({ name: 'perch-e2e', version: '0' })
@@ -25,48 +67,69 @@ function check(ok, what) {
   if (!ok) failures++
   return ok
 }
+async function findWindow(app) {
+  for (let i = 0; i < 20; i++) {
+    const list = await tool('read_windows')
+    const id = new RegExp(`^(\\d+) ${app} `, 'im').exec(list.text)?.[1]
+    if (id) return Number(id)
+    await sleep(500)
+  }
+  throw new Error(`no ${app} window`)
+}
+const ref = (tree, pattern) => new RegExp(`\\[(e\\d+) ${pattern}`).exec(tree)?.[1]
 
-const notepad = spawn('notepad.exe', [], { detached: true, stdio: 'ignore' })
-notepad.unref()
+spawn(app, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref()
 try {
   const status = await tool('read_status')
   check(status.text.includes('✔ window list'), 'read_status lists windows')
 
-  let id
-  for (let i = 0; i < 20 && !id; i++) {
-    const list = await tool('read_windows')
-    id = /^(\d+) notepad /im.exec(list.text)?.[1]
-    if (!id) await sleep(500)
-  }
-  if (!check(Boolean(id), 'read_windows shows Notepad')) throw new Error('no Notepad window')
-  const window = Number(id)
+  // --- The test app, behind Notepad: background steps must leave Notepad in front. ---
+  const testApp = await findWindow('perchtest')
+  spawn('notepad.exe', [], { detached: true, stdio: 'ignore' }).unref()
+  const notepad = await findWindow('notepad')
+  await sleep(1000)
+  const front = foreground()
+  check(front === String(notepad), `Notepad is in front before the background steps (foreground ${front})`)
 
-  const tree = await tool('read_window', { window })
-  const edit = /\[(e\d+) (?:edit|document)\b/.exec(tree.text)?.[1]
-  if (!check(Boolean(edit), 'read_window shows the text field')) throw new Error('no text field')
+  const tree = await tool('read_window', { window: testApp })
+  const big = ref(tree.text, 'button "Big"')
+  const remember = ref(tree.text, 'check box "Remember"')
+  if (!check(Boolean(big && remember), 'read_window shows the button and the check box')) throw new Error('test app tree')
 
-  const typed = await tool('act_window', { window, steps: [{ type: 'perch was here' }], then: 'tree' })
-  check(!typed.isError && typed.text.includes('perch was here'), 'background typing reaches the text field')
+  const clicked = await tool('act_window', { window: testApp, steps: [{ click: big }], then: 'tree' })
+  check(!clicked.isError && clicked.text.includes('"clicks 1"'), 'an e-ref click runs the button (Invoke) in the background')
+  const toggled = await tool('act_window', { window: testApp, steps: [{ click: remember }], then: 'tree' })
+  check(!toggled.isError && toggled.text.includes('"remembered"'), 'an e-ref click toggles the check box in the background')
+  const named = await tool('act_window', { window: testApp, steps: [{ action: remember, name: 'Toggle' }], then: 'tree' })
+  check(!named.isError && named.text.includes('"forgotten"'), 'an action step runs a named action')
+  check(foreground() === front, 'the background steps left the foreground window alone')
 
-  const set = await tool('act_window', { window, steps: [{ set: edit, value: 'replaced' }], then: 'tree' })
-  check(!set.isError && set.text.includes('= "replaced"'), 'set replaces the field value')
-
-  const shot = await tool('read_screenshot', { window, max_edge: 800 })
+  // --- Pointer input: a click in the middle of the screenshot hits the big button. ---
+  const shot = await tool('read_screenshot', { window: testApp, max_edge: 400 })
   const size = /(\d+)×(\d+) px/.exec(shot.text)
-  check(shot.images === 1 && size && Math.max(Number(size[1]), Number(size[2])) <= 800, 'window screenshot fits max_edge')
+  check(shot.images === 1 && size && Math.max(Number(size[1]), Number(size[2])) <= 400, 'window screenshot fits max_edge')
+  if (size) {
+    const middle = [Math.round(Number(size[1]) / 2), Math.round(Number(size[2]) * 0.6)]
+    const pointer = await tool('act_window', { window: testApp, steps: [{ focus: true }, { click: middle }], then: 'tree' })
+    check(!pointer.isError && pointer.text.includes('"clicks 2"'), 'a click at screenshot pixels lands on the button')
+    check(foreground() === String(testApp), 'the focus step brought the test app to the front')
+  }
 
+  // --- Notepad: background and focused typing, set. ---
+  const pad = await tool('read_window', { window: notepad })
+  const edit = ref(pad.text, '(?:edit|document)\\b')
+  if (!check(Boolean(edit), 'read_window shows Notepad\'s text field')) throw new Error('no text field')
+  const bg = await tool('act_window', { window: notepad, steps: [{ type: 'perch was here' }], then: 'tree' })
+  check(!bg.isError && bg.text.includes('perch was here'), 'background typing reaches the text field')
+  check(foreground() === String(testApp), 'background typing left the foreground window alone')
+  const set = await tool('act_window', { window: notepad, steps: [{ set: edit, value: 'replaced' }], then: 'tree' })
+  check(!set.isError && set.text.includes('= "replaced"'), 'set replaces the field value')
   const focused = await tool('act_window', {
-    window,
+    window: notepad,
     steps: [{ focus: true }, { key: 'ctrl+End', focused: true }, { type: ' and more', focused: true }],
     then: 'tree',
   })
   check(!focused.isError && focused.text.includes('replaced and more'), 'focused keys and typing land in the window')
-
-  if (size) {
-    const [w, h] = [Number(size[1]), Number(size[2])]
-    const click = await tool('act_window', { window, steps: [{ focus: true }, { click: [Math.round(w / 2), Math.round(h / 2)] }], then: 'none' })
-    check(!click.isError, 'a click at screenshot pixels is sent')
-  }
 
   const screen = await tool('read_screenshot', { max_edge: 1024 })
   check(screen.images === 1, 'whole-screen screenshot')
@@ -75,6 +138,7 @@ try {
   failures++
 } finally {
   spawnSync('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' })
+  spawnSync('taskkill', ['/IM', 'perchtest.exe', '/F'], { stdio: 'ignore' })
   await client.close()
 }
 console.log(failures ? `\n${failures} check(s) failed.` : '\nAll checks passed.')

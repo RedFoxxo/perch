@@ -96,8 +96,8 @@ What differs from Linux:
   be read but not clicked or typed into unless perch runs as administrator
   too.
 - **Slower steps:** the runtime runs every operation in a new process, so a
-  crashing capture can't take perch down; open-computer-use measured
-  0.4–2 s per operation.
+  crashing capture can't take perch down. On GitHub's Windows runner, reads
+  took 0.1 s and `act_window` calls 0.5–1.2 s.
 - **Scaled displays:** perch starts the runtime as system DPI aware
   (`__COMPAT_LAYER=HighDpiAware`, unless you set that variable), so window
   positions and UI Automation coordinates are both in pixels.
