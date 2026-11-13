@@ -12,8 +12,9 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
   actions), mouse steps only after an explicit `focus` step, refusal when a
   window id was reused by another app, and the server's whole failure
   reason (`message`, or `error` and its hint) with its recovery advice.
-- Drags take pixels of a whole-screen screenshot, so they land right with
-  scaled or several monitors. A failing window list, an unreadable window
+- Drags take pixels of a whole-screen screenshot, the capture pixels
+  computer-use-linux's `drag` expects, instead of adding window pixels to
+  logical window positions. A failing window list, an unreadable window
   and a cut-short tree are reported instead of looking empty. Steps already
   sent are reported when the desktop server fails midway.
 - `perch setup-window-targeting` installs GNOME's Shell extension with the
