@@ -3,7 +3,7 @@
 Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal).
 
-## 1.1.0 — unreleased
+## 1.1.0 — 2026-11-19
 
 - Windows: the same five tools over open-computer-use 1.3.0's Windows runtime
   (UI Automation, window messages, WGC/PrintWindow capture), started per
@@ -15,6 +15,21 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 - `read_status` shows a backend's own notes and setup advice.
 - CI on Linux and Windows; on Windows it drives Notepad through perch
   (`scripts/e2e-windows.mjs`).
+- `act_window` refuses `[x, y]` points (clicks, scrolls, drags) outside the
+  screenshot they come from, which would land outside the window.
+- Windows: `read_screenshot` with `file` saves only to a new absolute `.png`
+  path, as on Linux, instead of replacing any file. A runtime that exits
+  before reading its request is reported instead of crashing perch.
+- An element whose primary action is named `constructor` (or another object
+  key) is no longer taken for a click action.
+- Trees cut text and field values at 1,000 characters, saying how many were
+  left out.
+- The tool list is 24% smaller (6.4 KB to 4.8 KB): no `$schema` lines or
+  `execution` fields, element ref and point descriptions said once in
+  `act_window`'s description, `[x, y]` as an array of two numbers.
+- MCP SDK 1.32.2 and zod 4.6.7, which fix published advisories.
+- The README covers requirements, setup for Claude Code, opencode and other
+  clients, and limitations; maintainer notes moved to `DEVELOPMENT.md`.
 
 ## 1.0.0 — 2026-11-13
 
