@@ -2,12 +2,16 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import type { BackendResult } from '../backend.js'
 import { FocusedWindow } from '../upstream.js'
-import { listWindows, readScreenshot, readWindow } from './read.js'
-import { defineTool, failure, text, type ToolContext } from './types.js'
+import { listWindows, readScreenshot, readWindow, windowId } from './read.js'
+import { defineTool, failure, text, type Screenshot, type ToolContext } from './types.js'
 
-const Ref = z.string().regex(/^e\d+$/).describe('Element ref from read_window, e.g. e34')
-const Point = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of this window')
-const ScreenPoint = z.tuple([z.number(), z.number()]).describe('[x, y] in pixels of the last read_screenshot of the whole screen (Windows: of this window)')
+// The tool description says what refs and points are, once; per-field descriptions would repeat it in every step.
+const Ref = z.string().regex(/^e\d+$/)
+// An array of two rather than a tuple: shorter in the tool list, and read the same by every JSON Schema draft.
+const Point = z
+  .array(z.number())
+  .length(2)
+  .transform((p) => p as [number, number])
 const Target = z.union([Ref, Point])
 
 const Step = z.union([
@@ -16,19 +20,13 @@ const Step = z.union([
     button: z.enum(['left', 'right', 'middle']).optional(),
     count: z.number().int().min(1).max(3).optional().describe('2 for a double click'),
   }),
-  z.strictObject({
-    type: z.string().describe('Literal text'),
-    focused: z.boolean().optional().describe('Type into the focused window, after a focus step (any layout and characters)'),
-  }),
-  z.strictObject({
-    key: z.string().describe('Key or chord, e.g. Return, ctrl+s, alt+F4'),
-    focused: z.boolean().optional(),
-  }),
+  z.strictObject({ type: z.string().describe('Literal text'), focused: z.boolean().optional() }),
+  z.strictObject({ key: z.string().describe('Key or chord, e.g. Return, ctrl+s, alt+F4'), focused: z.boolean().optional() }),
   z.strictObject({ set: Ref, value: z.string().describe('Fills a field or slider directly') }),
   z.strictObject({ action: Ref, name: z.string().optional().describe('Named action; default: its first') }),
   z.strictObject({ scroll: Target, direction: z.enum(['up', 'down', 'left', 'right']), pages: z.number().positive().optional() }),
-  z.strictObject({ drag: ScreenPoint, to: ScreenPoint }),
-  z.strictObject({ focus: z.literal(true).describe('Bring the window to the front') }),
+  z.strictObject({ drag: Point, to: Point }),
+  z.strictObject({ focus: z.literal(true) }),
   z.strictObject({ wait: z.number().int().min(0).max(10_000).describe('Milliseconds') }),
 ])
 type Step = z.infer<typeof Step>
@@ -42,11 +40,21 @@ function element(ref: string, window: number, ctx: ToolContext) {
   return { element_index: Number(ref.slice(1)), snapshot_id: snapshot.id }
 }
 
-/** Converts image pixels of the window's last screenshot to the window-relative capture pixels the server takes. */
-function point([x, y]: [number, number], window: number, ctx: ToolContext) {
+/**
+ * Converts image pixels of a screenshot to the capture pixels the server takes. A point outside the
+ * image would land outside the window, in whatever the user has there.
+ */
+function toCapture([x, y]: [number, number], shot: Screenshot, of: string): [number, number] {
+  if (x < 0 || y < 0 || x >= shot.width || y >= shot.height) throw new Refused(`[${x}, ${y}] is outside ${of} (${shot.width}×${shot.height} px).`)
+  return [Math.round(x / shot.scale), Math.round(y / shot.scale)]
+}
+
+/** The window-relative capture pixels of a point of the window's last screenshot. */
+function point(p: [number, number], window: number, ctx: ToolContext) {
   const shot = ctx.session.screenshots.get(window)
   if (!shot) throw new Refused(`read_screenshot window ${window} first: [x, y] are pixels of its last screenshot.`)
-  return { x: Math.round(x / shot.scale), y: Math.round(y / shot.scale) }
+  const [x, y] = toCapture(p, shot, `the last screenshot of window ${window}`)
+  return { x, y }
 }
 
 function target(t: string | [number, number], window: number, ctx: ToolContext) {
@@ -93,9 +101,9 @@ function dragArgs(step: { drag: [number, number]; to: [number, number] }, window
       inWindow ? `read_screenshot window ${window} first: drag points are pixels of its last screenshot.` : 'read_screenshot without a window first: drag points are pixels of the whole screen.',
     )
   }
-  const toCapture = ([x, y]: [number, number]) => [Math.round(x / shot.scale), Math.round(y / shot.scale)] as const
-  const [sx, sy] = toCapture(step.drag)
-  const [ex, ey] = toCapture(step.to)
+  const of = inWindow ? `the last screenshot of window ${window}` : 'the last whole-screen screenshot'
+  const [sx, sy] = toCapture(step.drag, shot, of)
+  const [ex, ey] = toCapture(step.to, shot, of)
   return { ...(inWindow ? { window_id: window } : {}), start_x: sx, start_y: sy, end_x: ex, end_y: ey }
 }
 
@@ -113,7 +121,10 @@ function labelOf(step: Step): string {
   return `wait ${step.wait} ms`
 }
 
-/** Primary actions that mean "click" (AT-SPI's, then UI Automation's); the server substitutes only these for a pointer click too. */
+/**
+ * Primary actions that mean "click" (AT-SPI's, then UI Automation's); the server substitutes only these for a pointer click too.
+ * Looked up with `Object.hasOwn`: apps name their actions, and `constructor` must not count.
+ */
 const CLICK_ACTIONS: Record<string, true> = { click: true, press: true, toggle: true, invoke: true, select: true }
 
 /** Steps that move the real pointer: the window, and its workspace, must be on screen, so they come to the front. */
@@ -135,7 +146,7 @@ async function run(step: Step, window: number, ctx: ToolContext, focused: boolea
       const el = element(step.click, window, ctx)
       const actions = ctx.session.snapshot?.actions.get(el.element_index) ?? []
       const primary = actions[0]
-      if (primary === undefined || !CLICK_ACTIONS[primary.toLowerCase()]) {
+      if (primary === undefined || !Object.hasOwn(CLICK_ACTIONS, primary.toLowerCase())) {
         const has = actions.length ? `its actions are ${actions.map((a) => JSON.stringify(a)).join(', ')}` : 'it has no actions'
         throw new Refused(`${step.click} can't be clicked in the background (${has}): use { action: "${step.click}", name } or a focus step and a click on a screenshot point.`)
       }
@@ -168,14 +179,15 @@ export const actTools = [
   defineTool({
     name: 'act_window',
     description:
-      'Run steps in one window, in order, stopping at the first that fails: click, type, key, set, action, scroll, drag, focus, wait. ' +
-      'Targets are e-refs from read_window or [x, y] pixels of its read_screenshot; drag takes pixels of a whole-screen read_screenshot (Windows: of the window\'s). ' +
-      'Element clicks, set and action don\'t bring the window to the front (Windows: classic controls may, and the step says so); keys and typing don\'t on Hyprland and Windows (some Windows apps ignore them: check), elsewhere they focus it. ' +
+      'Run steps in one window, in order; stops at the first that fails. ' +
+      "Targets: e-refs from read_window, or [x, y] pixels of this window's last read_screenshot (drag: of a whole-screen read_screenshot; Windows: of the window's). " +
+      "Element clicks, set and action don't bring the window to the front (Windows: classic controls may, and the step says so). " +
+      'Keys and typing stay in the background on Hyprland and Windows (some Windows apps ignore them: check); elsewhere they focus the window. ' +
       'Mouse steps ([x, y] clicks, right or double clicks, scroll, drag) need a focus step first, which shows the window to the user. ' +
-      'focused: true sends real keys to the focused window, refused if the focus moved. then: tree (default after read_window) or screenshot ' +
-      '(brings the window forward except on Hyprland and Windows) shows the result.',
+      'focused: true sends real keys (any layout and characters) to the window after a focus step; refused if the focus moved. ' +
+      'then: tree (default after read_window), screenshot (raises the window except on Hyprland and Windows) or none.',
     input: {
-      window: z.number().int().describe('Window id from read_windows'),
+      window: windowId,
       steps: z.array(Step).min(1).max(20),
       then: z.enum(['tree', 'screenshot', 'none']).optional(),
     },

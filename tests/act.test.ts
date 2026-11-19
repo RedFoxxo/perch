@@ -46,6 +46,18 @@ describe('act_window', () => {
     expect(calls.map((c) => c.tool)).toEqual(['get_app_state'])
   })
 
+  it('refuses a click on an element whose primary action is only named like an object key', async () => {
+    const { backend, calls } = fakeBackend({
+      get_app_state: () => ok({ snapshot_id: 's', accessibility_tree: [{ index: 5, role: 'button', name: 'Odd', states: ['enabled', 'showing'], actions: ['constructor'] }] }),
+      perform_action: done,
+    })
+    const ctx = context(backend)
+    await call('read_window', { window: W }, ctx)
+    const r = await call('act_window', { window: W, steps: [{ click: 'e5' }], then: 'none' }, ctx)
+    expect(textOf(r)).toContain(`refused click e5: e5 can't be clicked in the background`)
+    expect(calls.map((c) => c.tool)).toEqual(['get_app_state'])
+  })
+
   it('uses the pointer for right and double clicks, after a focus step', async () => {
     const { backend, calls } = fakeBackend({ get_app_state: tree('snap-1'), activate_window: done, click: done })
     const ctx = context(backend)
@@ -109,6 +121,18 @@ describe('act_window', () => {
     expect(calls.map((c) => c.tool)).toEqual(['activate_window'])
   })
 
+  it('refuses points outside the screenshot, which would land in other windows', async () => {
+    const { backend, calls } = fakeBackend({ screenshot: () => ok({ width: 100, height: 80, scale: 0.5 }), activate_window: done, click: done, scroll: done })
+    const ctx = context(backend)
+    await call('read_screenshot', { window: W, max_edge: 1024 }, ctx)
+    for (const step of [{ click: [100, 10] }, { click: [-1, 10] }, { scroll: [10, 80], direction: 'down' }]) {
+      const r = await call('act_window', { window: W, steps: [{ focus: true }, step], then: 'none' }, ctx)
+      expect(textOf(r)).toContain(`is outside the last screenshot of window ${W} (100×80 px)`)
+    }
+    expect(calls.map((c) => c.tool)).not.toContain('click')
+    expect(calls.map((c) => c.tool)).not.toContain('scroll')
+  })
+
   it('stops at the first failing step and says which steps did not run', async () => {
     const { backend, calls } = fakeBackend({ press_key: done, type_text: failed('Did not send input: the active keymap is not US. More detail.') })
     const r = await call('act_window', { window: W, steps: [{ key: 'ctrl+l' }, { type: 'é' }, { key: 'Return' }], then: 'none' }, context(backend))
@@ -152,6 +176,15 @@ describe('act_window', () => {
     await call('read_screenshot', { window: W, max_edge: 500 }, ctx)
     const r = await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 10], to: [50, 60] }] }, ctx)
     expect(textOf(r)).toContain('refused drag [10,10] to [50,60]: read_screenshot without a window first')
+    expect(calls.map((c) => c.tool)).not.toContain('drag')
+  })
+
+  it('refuses a drag that ends outside the whole-screen screenshot', async () => {
+    const { backend, calls } = fakeBackend({ screenshot: () => ok({ width: 960, height: 270, scale: 0.25 }), activate_window: done, drag: done })
+    const ctx = context(backend)
+    await call('read_screenshot', { max_edge: 960 }, ctx)
+    const r = await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 10], to: [10, 300] }] }, ctx)
+    expect(textOf(r)).toContain('refused drag [10,10] to [10,300]: [10, 300] is outside the last whole-screen screenshot (960×270 px)')
     expect(calls.map((c) => c.tool)).not.toContain('drag')
   })
 

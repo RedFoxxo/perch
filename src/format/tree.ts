@@ -29,6 +29,13 @@ const INTERACTIVE: Record<string, true> = {
 }
 /** States shown in a line; the common ones (enabled, visible, focusable…) are implied. */
 const SHOWN_STATES = ['checked', 'selected', 'focused', 'expanded', 'editable', 'pressed'] as const
+/** Characters of an element's text or value shown; an editor's whole document would flood the context. */
+const MAX_TEXT = 1000
+
+function quoted(s: string): string {
+  if (s.length <= MAX_TEXT) return JSON.stringify(s)
+  return `${JSON.stringify(`${s.slice(0, MAX_TEXT)}…`)} (${s.length - MAX_TEXT} more characters)`
+}
 
 /**
  * A window's accessibility tree as compact text, one element per line, indented
@@ -63,8 +70,8 @@ export function formatTree(nodes: TreeNode[]): string {
       if (!states.has('enabled') && !states.has('sensitive')) flags.push('disabled')
       for (const s of SHOWN_STATES) if (states.has(s)) flags.push(s)
       let line = `${'  '.repeat(depth)}[e${node.index} ${node.role}${node.name ? ` ${JSON.stringify(node.name)}` : ''}${flags.length ? ` ${flags.join(' ')}` : ''}]`
-      if (text && text !== node.name) line += ` ${JSON.stringify(text)}`
-      if (node.value?.text) line += ` = ${JSON.stringify(node.value.text)}`
+      if (text && text !== node.name) line += ` ${quoted(text)}`
+      if (node.value?.text) line += ` = ${quoted(node.value.text)}`
       else if (node.value?.current != null) line += ` = ${node.value.current}`
       lines.push(line)
       next = depth + 1

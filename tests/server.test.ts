@@ -39,8 +39,27 @@ describe('server', () => {
   // computer-use-linux lists 19 tools in 67.8 KB plus 7.6 KB of instructions; perch exists to cost a fraction of that.
   it('keeps the tool list small and sends no server instructions', async () => {
     const { tools, instructions } = await listTools()
-    expect(JSON.stringify(tools).length).toBeLessThan(8_000)
+    expect(JSON.stringify(tools).length).toBeLessThan(5_000)
     expect(instructions).toBeUndefined()
+  })
+
+  it('lists schemas without the $schema line and execution field, which tell the model nothing', async () => {
+    const { tools } = await listTools()
+    for (const tool of tools) {
+      expect(tool.inputSchema).not.toHaveProperty('$schema')
+      expect(tool).not.toHaveProperty('execution')
+    }
+  })
+
+  it('takes [x, y] as exactly two numbers', async () => {
+    const { backend, calls } = fakeBackend({})
+    const server = createServer(context(backend))
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(a), client.connect(b)])
+    const r = await client.callTool({ name: 'act_window', arguments: { window: 7, steps: [{ focus: true }, { click: [1, 2, 3] }] } })
+    expect(r.isError).toBe(true)
+    expect(calls).toEqual([])
   })
 
   it('reports the package version', () => {

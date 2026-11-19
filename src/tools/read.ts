@@ -4,7 +4,8 @@ import { formatTree } from '../format/tree.js'
 import { AppState, Doctor, ScreenshotMeta, TreeNode, WindowList, type Window } from '../upstream.js'
 import { defineTool, failure, text, type ToolContext, type ToolOutput } from './types.js'
 
-const windowId = z.number().int().describe('Window id from read_windows')
+// Not .int(): its JSON Schema adds ±2^53 bounds to every tool list; a fractional id just finds no window.
+export const windowId = z.number().describe('Window id from read_windows')
 
 /** The window list, or why it can't be had: the server answers a failed listing with no windows and an `error`. */
 export async function listWindows(ctx: ToolContext): Promise<{ windows: Window[] } | { error: string }> {
@@ -52,7 +53,7 @@ export async function readScreenshot(window: number | undefined, maxEdge: number
   })
   if (!res.ok) return failure(res.message || 'Could not take the screenshot.')
   const meta = ScreenshotMeta.parse(res.data)
-  ctx.session.screenshots.set(window ?? 'screen', { scale: meta.scale })
+  ctx.session.screenshots.set(window ?? 'screen', { width: meta.width, height: meta.height, scale: meta.scale })
   const size = `${meta.width}×${meta.height} px`
   const how = window === undefined ? '' : ' act_window click [x, y] takes pixels of this image.'
   return text(meta.file_path ? `Saved ${meta.file_path} (${size}).${how}` : `${size}.${how}`, res.images)

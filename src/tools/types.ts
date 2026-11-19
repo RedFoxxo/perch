@@ -10,10 +10,17 @@ export interface Session {
    * `actions` holds each element's action names, first is the primary one.
    */
   snapshot?: { window: number; id: string; actions: Map<number, string[]> }
-  /** Per window (or `screen`), how the last screenshot maps image pixels to capture pixels. */
-  screenshots: Map<number | 'screen', { scale: number }>
+  /** Per window (or `screen`), the last screenshot. */
+  screenshots: Map<number | 'screen', Screenshot>
   /** The last `read_windows` answer, for window positions. */
   windows: Map<number, Window>
+}
+
+/** A screenshot's image size, and its image pixels per capture pixel. */
+export interface Screenshot {
+  width: number
+  height: number
+  scale: number
 }
 
 export interface ToolContext {

@@ -36,4 +36,15 @@ describe('formatTree', () => {
   it('returns nothing for a window without a tree', () => {
     expect(formatTree([{ index: 0, role: 'application', name: 'xcalc' }])).toBe('')
   })
+
+  it('cuts long text and values short and says how much was left out', () => {
+    const long = 'x'.repeat(1500)
+    const out = formatTree([
+      { index: 1, role: 'frame', name: 'Editor', states: ['enabled', 'showing'] },
+      { index: 2, parent_index: 1, role: 'text', states: ['enabled', 'showing', 'editable'], text: { content: long } },
+      { index: 3, parent_index: 1, role: 'entry', states: ['enabled', 'showing'], value: { text: long } },
+    ])
+    const cut = JSON.stringify(`${'x'.repeat(1000)}…`)
+    expect(out).toBe(`[e1 frame "Editor"]\n  [e2 text editable] ${cut} (500 more characters)\n  [e3 entry] = ${cut} (500 more characters)`)
+  })
 })

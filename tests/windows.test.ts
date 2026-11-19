@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { decodePng, encodeRgb, fitPng } from '../src/png.js'
 import { allTools } from '../src/server.js'
 import { newSession, type ToolContext, type ToolOutput } from '../src/tools/types.js'
-import { windowsBackend, type OpRequest, type OpResponse } from '../src/windows.js'
+import { openComputerUse, windowsBackend, type OpRequest, type OpResponse } from '../src/windows.js'
 
 const W = 4242
 const FOREGROUND = 'OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOREGROUND_INPUT'
@@ -148,6 +149,34 @@ describe('Windows backend', () => {
     await call('read_screenshot', { window: W, max_edge: 1024 }, ctx)
     await call('act_window', { window: W, steps: [{ focus: true }, { drag: [10, 20], to: [30, 40] }], then: 'none' }, ctx)
     expect(requests.at(-1)).toMatchObject({ tool: 'drag', windowId: W, from_x: 20, from_y: 40, to_x: 60, to_y: 80, input_method: 'global' })
+  })
+
+  it('saves a screenshot only to a new absolute .png path, never over an existing file', async () => {
+    const { ctx } = setup()
+    const dir = mkdtempSync(join(tmpdir(), 'perch-test-'))
+    try {
+      const existing = join(dir, 'notes.png')
+      writeFileSync(existing, 'keep')
+      const over = await call('read_screenshot', { window: W, max_edge: 400, file: existing }, ctx)
+      expect(over.isError).toBe(true)
+      expect(readFileSync(existing, 'utf8')).toBe('keep')
+      for (const file of ['shot.png', join(dir, 'shot.txt')]) {
+        const r = await call('read_screenshot', { window: W, max_edge: 400, file }, ctx)
+        expect(textOf(r)).toContain('a new absolute path ending in .png')
+        expect(existsSync(file)).toBe(false)
+      }
+      const fresh = join(dir, 'shot.png')
+      expect(textOf(await call('read_screenshot', { window: W, max_edge: 400, file: fresh }, ctx))).toContain(`Saved ${fresh} (400×200 px).`)
+      expect(readFileSync(fresh).subarray(1, 4).toString()).toBe('PNG')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports a runtime that exits without reading its request, instead of crashing perch', async () => {
+    // Node exits at once on a missing script `op`, while perch is still writing the request.
+    const runtime = openComputerUse(() => process.execPath)
+    await expect(runtime.op({ tool: 'type_text', text: 'x'.repeat(8 << 20) })).rejects.toThrow(/open-computer-use op exited with 1/)
   })
 })
 

@@ -1,7 +1,21 @@
 {
   "name": "@redfoxxo/perch",
   "version": "1.1.0",
-  "description": "A small MCP server for desktop control on Linux and Windows: a few compact tools over computer-use-linux and open-computer-use, built to keep the agent's context small.",
+  "description": "MCP server for desktop control on Linux and Windows: five compact tools over computer-use-linux and open-computer-use",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "desktop-automation",
+    "accessibility",
+    "computer-use",
+    "linux",
+    "windows"
+  ],
+  "homepage": "https://github.com/RedFoxxo/perch#readme",
+  "bugs": {
+    "url": "https://github.com/RedFoxxo/perch/issues"
+  },
   "type": "module",
   "bin": {
     "perch": "build/index.js"
@@ -16,8 +30,8 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "4.6.5"
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
   },
   "optionalDependencies": {
     "@agent-sh/computer-use-linux": "0.7.53",
@@ -26,7 +40,7 @@
   "devDependencies": {
     "@types/node": "22.20.4",
     "typescript": "7.0.2",
-    "vitest": "5.0.1"
+    "vitest": "5.1.1"
   },
   "files": [
     "build/**/*.js",

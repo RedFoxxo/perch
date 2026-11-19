@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, extname, isAbsolute, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { z } from 'zod'
 import type { Backend, BackendResult } from './backend.js'
@@ -122,7 +122,10 @@ export function roleOf(controlType: string | undefined): string {
     .toLowerCase()
 }
 
-/** Actions perch can run as an `action` step; values and scrolling have their own steps. */
+/**
+ * Actions perch can run as an `action` step; values and scrolling have their own steps. Looked up
+ * with `Object.hasOwn`: apps name their actions, and `constructor` must not count.
+ */
 const ACTIONS: Record<string, true> = { Invoke: true, Toggle: true, Select: true, Expand: true, Collapse: true, ScrollIntoView: true }
 
 /**
@@ -150,7 +153,7 @@ export function treeOf(records: ElementRecord[], lines: string[], bounds: Frame 
       role: roleOf(r.controlType),
       name: r.name || null,
       states,
-      actions: (r.actions ?? []).filter((a) => ACTIONS[a]),
+      actions: (r.actions ?? []).filter((a) => Object.hasOwn(ACTIONS, a)),
       value: r.value ? { text: r.value } : null,
     }
   })
@@ -222,6 +225,10 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
 
   async function screenshot(args: Record<string, unknown>): Promise<BackendResult> {
     const maxEdge = (args.max_width as number | undefined) ?? 1024
+    const file = args.screenshot_file_path as string | undefined
+    if (file !== undefined && (!isAbsolute(file) || extname(file).toLowerCase() !== '.png')) {
+      return failed(`file must be a new absolute path ending in .png, not ${file}.`)
+    }
     let png: Buffer
     let unitWidth: number
     const window = args.window_id as number | undefined
@@ -241,9 +248,13 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
     const fit = fitPng(png, maxEdge)
     // Image pixels per window (or screen) unit: act_window divides points by it.
     const meta = { width: fit.width, height: fit.height, scale: fit.width / unitWidth }
-    const file = args.screenshot_file_path as string | undefined
     if (file) {
-      writeFileSync(file, fit.png)
+      // As computer-use-linux does: a new file only, so a screenshot never replaces one.
+      try {
+        writeFileSync(file, fit.png, { flag: 'wx' })
+      } catch (error) {
+        return failed(`could not save ${file}: ${error instanceof Error ? error.message : String(error)}`)
+      }
       return done({ ...meta, file_path: file })
     }
     return { ...done(meta), images: [{ data: fit.png.toString('base64'), mimeType: 'image/png' }] }
@@ -292,7 +303,7 @@ export function windowsBackend(runtime: WindowsRuntime = openComputerUse()): Bac
       case 'perform_action': {
         const r = record(args)
         if (isResult(r)) return r
-        const name = (args.action as string | undefined) ?? r.actions?.find((a) => ACTIONS[a])
+        const name = (args.action as string | undefined) ?? r.actions?.find((a) => Object.hasOwn(ACTIONS, a))
         if (!name) return failed(`e${r.index} has no actions.`)
         return act({ tool: 'perform_secondary_action', windowId: window, element: r, action: name.toLowerCase(), ...gates() })
       }
@@ -368,12 +379,13 @@ export function openComputerUseExe(): string {
 /** Reads that crashed are retried, as open-computer-use does: a window still settling can kill the worker. */
 const RETRIED: Record<string, true> = { list_windows: true, get_window_state: true }
 
-function openComputerUse(): WindowsRuntime {
+/** The runtime as separate processes; `findExe` is replaced in tests. */
+export function openComputerUse(findExe: () => string = openComputerUseExe): WindowsRuntime {
   let exe: string | undefined
   const run = (args: string[], input?: string): Promise<string> => {
     const { promise, resolve, reject } = Promise.withResolvers<string>()
     try {
-      exe ??= openComputerUseExe()
+      exe ??= findExe()
     } catch {
       reject(new Error('open-computer-use is not installed: reinstall perch (npm skipped an optional dependency).'))
       return promise
@@ -391,6 +403,8 @@ function openComputerUse(): WindowsRuntime {
       if (code === 0 && stdout.trim()) resolve(stdout)
       else reject(new Error(`open-computer-use ${args[0]} exited with ${code}: ${(stderr || stdout).trim().slice(0, 300)}`))
     })
+    // A runtime that exits before reading its request breaks the pipe; `close` reports it instead.
+    child.stdin.on('error', () => {})
     child.stdin.end(input ?? '')
     return promise
   }

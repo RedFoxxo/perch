@@ -43,7 +43,7 @@ function parseJson(text: string): unknown {
 async function main(): Promise<void> {
   const command = process.argv[2]
   if (command !== undefined) {
-    if (SETUP_COMMANDS[command]) runSetup(command)
+    if (Object.hasOwn(SETUP_COMMANDS, command)) runSetup(command)
     process.stderr.write(`perch: unknown command ${command}. Without arguments perch is an MCP server on stdio; setup: ${Object.keys(SETUP_COMMANDS).join(', ')}.\n`)
     process.exit(1)
   }
